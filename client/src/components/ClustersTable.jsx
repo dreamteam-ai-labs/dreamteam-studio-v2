@@ -1,4 +1,4 @@
-import { useState, useCallback, memo } from 'react';
+import React, { useState, useCallback, memo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getClusters, getProblemsByCluster, getSolutionsByCluster, getClustersFilterOptions } from '../services/api';
 import SearchInput from './SearchInput';
@@ -98,6 +98,8 @@ const FiltersSection = memo(function FiltersSection({
 // Cluster row component for expandable functionality
 function ClusterRow({ cluster, visibleColumns }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [problemSort, setProblemSort] = useState({ field: 'impact', order: 'desc' });
+  const [solutionSort, setSolutionSort] = useState({ field: 'viability', order: 'desc' });
   
   const { data: problems, isLoading: problemsLoading } = useQuery({
     queryKey: ['cluster-problems', cluster.cluster_id],
@@ -112,6 +114,63 @@ function ClusterRow({ cluster, visibleColumns }) {
     enabled: isExpanded,
     staleTime: 1000 * 60 * 5,
   });
+  
+  // Sort problems
+  const sortedProblems = React.useMemo(() => {
+    if (!problems) return [];
+    const sorted = [...problems];
+    
+    sorted.sort((a, b) => {
+      let compareValue = 0;
+      
+      switch (problemSort.field) {
+        case 'title':
+          compareValue = (a.title || '').localeCompare(b.title || '');
+          break;
+        case 'impact':
+          const impactOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+          compareValue = (impactOrder[a.impact] || 0) - (impactOrder[b.impact] || 0);
+          break;
+        case 'similarity':
+          compareValue = (parseFloat(a.cluster_similarity) || 0) - (parseFloat(b.cluster_similarity) || 0);
+          break;
+        default:
+          return 0;
+      }
+      
+      return problemSort.order === 'asc' ? compareValue : -compareValue;
+    });
+    
+    return sorted;
+  }, [problems, problemSort]);
+  
+  // Sort solutions
+  const sortedSolutions = React.useMemo(() => {
+    if (!solutions) return [];
+    const sorted = [...solutions];
+    
+    sorted.sort((a, b) => {
+      let compareValue = 0;
+      
+      switch (solutionSort.field) {
+        case 'title':
+          compareValue = (a.title || '').localeCompare(b.title || '');
+          break;
+        case 'viability':
+          compareValue = (a.overall_viability || 0) - (b.overall_viability || 0);
+          break;
+        case 'status':
+          compareValue = (a.status || '').localeCompare(b.status || '');
+          break;
+        default:
+          return 0;
+      }
+      
+      return solutionSort.order === 'asc' ? compareValue : -compareValue;
+    });
+    
+    return sorted;
+  }, [solutions, solutionSort]);
 
   return (
     <>
@@ -183,16 +242,35 @@ function ClusterRow({ cluster, visibleColumns }) {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Problems Section */}
                 <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                    📋 Problems ({problems?.length || 0})
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                      📋 Problems ({problems?.length || 0})
+                    </div>
+                    {problems?.length > 1 && (
+                      <select
+                        value={`${problemSort.field}-${problemSort.order}`}
+                        onChange={(e) => {
+                          const [field, order] = e.target.value.split('-');
+                          setProblemSort({ field, order });
+                        }}
+                        className="text-xs border rounded px-2 py-1"
+                      >
+                        <option value="impact-desc">Impact ↓</option>
+                        <option value="impact-asc">Impact ↑</option>
+                        <option value="title-asc">Title A-Z</option>
+                        <option value="title-desc">Title Z-A</option>
+                        <option value="similarity-desc">Similarity ↓</option>
+                        <option value="similarity-asc">Similarity ↑</option>
+                      </select>
+                    )}
                   </div>
                   {problemsLoading ? (
                     <div className="text-sm text-gray-500">Loading problems...</div>
-                  ) : problems?.length === 0 ? (
+                  ) : sortedProblems?.length === 0 ? (
                     <div className="text-sm text-gray-500 italic">No problems in this cluster</div>
                   ) : (
                     <div className="space-y-2 max-h-96 overflow-y-auto">
-                      {problems?.map((problem) => (
+                      {sortedProblems?.map((problem) => (
                         <div key={problem.id} className="bg-white p-3 rounded border border-gray-200">
                           <div className="text-sm font-medium text-gray-900">
                             {problem.title}
@@ -222,16 +300,35 @@ function ClusterRow({ cluster, visibleColumns }) {
 
                 {/* Solutions Section */}
                 <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                    💡 Solutions ({solutions?.length || 0})
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                      💡 Solutions ({solutions?.length || 0})
+                    </div>
+                    {solutions?.length > 1 && (
+                      <select
+                        value={`${solutionSort.field}-${solutionSort.order}`}
+                        onChange={(e) => {
+                          const [field, order] = e.target.value.split('-');
+                          setSolutionSort({ field, order });
+                        }}
+                        className="text-xs border rounded px-2 py-1"
+                      >
+                        <option value="viability-desc">Viability ↓</option>
+                        <option value="viability-asc">Viability ↑</option>
+                        <option value="title-asc">Title A-Z</option>
+                        <option value="title-desc">Title Z-A</option>
+                        <option value="status-asc">Status A-Z</option>
+                        <option value="status-desc">Status Z-A</option>
+                      </select>
+                    )}
                   </div>
                   {solutionsLoading ? (
                     <div className="text-sm text-gray-500">Loading solutions...</div>
-                  ) : solutions?.length === 0 ? (
+                  ) : sortedSolutions?.length === 0 ? (
                     <div className="text-sm text-gray-500 italic">No solutions for this cluster</div>
                   ) : (
                     <div className="space-y-2 max-h-96 overflow-y-auto">
-                      {solutions?.map((solution) => (
+                      {sortedSolutions?.map((solution) => (
                         <div key={solution.id} className="bg-white p-3 rounded border border-green-200">
                           <div className="flex justify-between items-start">
                             <div className="flex-1">

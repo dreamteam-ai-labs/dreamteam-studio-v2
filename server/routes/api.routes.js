@@ -46,6 +46,15 @@ router.get('/problems/:id', async (req, res) => {
   }
 });
 
+router.get('/problems/:id/solutions', async (req, res) => {
+  try {
+    const solutions = await databaseService.getSolutionsByProblem(req.params.id);
+    res.json(solutions);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // === CLUSTERS ===
 router.get('/clusters', async (req, res) => {
   try {

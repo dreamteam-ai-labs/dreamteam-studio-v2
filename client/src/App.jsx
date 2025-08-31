@@ -5,6 +5,7 @@ import ProblemsTableMultiLevel from './components/ProblemsTableMultiLevel';
 import ClustersTable from './components/ClustersTable';
 import SolutionsTable from './components/SolutionsTable';
 import ProjectsTable from './components/ProjectsTable';
+import GraphView from './components/GraphView';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -94,6 +95,18 @@ function App() {
                     >
                       Projects
                     </NavLink>
+                    <NavLink
+                      to="/graph"
+                      className={({ isActive }) =>
+                        `inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                          isActive
+                            ? 'border-primary-500 text-gray-900'
+                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                        }`
+                      }
+                    >
+                      Graph View
+                    </NavLink>
                   </div>
                 </div>
                 <div className="flex items-center">
@@ -113,6 +126,7 @@ function App() {
               <Route path="/clusters" element={<ClustersTable />} />
               <Route path="/solutions" element={<SolutionsTable />} />
               <Route path="/projects" element={<ProjectsTable />} />
+              <Route path="/graph" element={<GraphView />} />
             </Routes>
           </main>
         </div>

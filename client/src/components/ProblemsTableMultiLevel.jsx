@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getProblems, getProblemsFilterOptions, getSolutionsByCluster } from '../services/api';
+import { getProblems, getProblemsFilterOptions, getSolutionsByCluster, getSolutionsByProblem } from '../services/api';
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 
@@ -20,11 +20,114 @@ const DEFAULT_COLUMNS = ['title', 'cluster_label', 'impact', 'solution_count'];
 // Items per page for pagination
 const ITEMS_PER_PAGE = 20;
 
+// Component to display solutions for a problem
+function ProblemSolutions({ problemId, clusterId, clusterLabel }) {
+  // Fetch direct solutions for this problem
+  const { data: directSolutions, isLoading: directLoading } = useQuery({
+    queryKey: ['problem-direct-solutions', problemId],
+    queryFn: () => getSolutionsByProblem(problemId),
+    enabled: !!problemId,
+  });
+  
+  // Fetch cluster solutions
+  const { data: clusterSolutions, isLoading: clusterLoading } = useQuery({
+    queryKey: ['problem-cluster-solutions', clusterId],
+    queryFn: () => getSolutionsByCluster(clusterId),
+    enabled: !!clusterId,
+  });
+  
+  const renderSolution = (solution) => (
+    <div key={solution.id} className="bg-white p-3 rounded border border-green-200">
+      <div className="flex justify-between items-start">
+        <div className="flex-1">
+          <p className="text-sm font-medium text-gray-900">{solution.title}</p>
+          {solution.description && (
+            <p className="text-xs text-gray-600 mt-1 line-clamp-2">
+              {solution.description}
+            </p>
+          )}
+        </div>
+        {solution.overall_viability && (
+          <div className="ml-3 text-right">
+            <div className={`text-sm font-bold ${
+              solution.overall_viability >= 80 ? 'text-green-600' :
+              solution.overall_viability >= 60 ? 'text-yellow-600' :
+              'text-red-600'
+            }`}>
+              {solution.overall_viability}%
+            </div>
+            <div className="text-xs text-gray-500">viability</div>
+          </div>
+        )}
+      </div>
+      
+      <div className="flex gap-3 mt-2">
+        {solution.status && (
+          <span className={`text-xs px-2 py-0.5 rounded ${
+            solution.status === 'approved' ? 'bg-green-100 text-green-800' :
+            solution.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+            'bg-gray-100 text-gray-800'
+          }`}>
+            {solution.status}
+          </span>
+        )}
+        {solution.linear_project_id && (
+          <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-800">
+            📋 Has Project
+          </span>
+        )}
+        {solution.tech_stack && (
+          <span className="text-xs text-gray-500">
+            {solution.tech_stack}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+  
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Direct Solutions */}
+      <div>
+        <div className="text-sm font-semibold text-gray-700 mb-2">
+          🎯 Direct Solutions
+        </div>
+        {directLoading ? (
+          <p className="text-sm text-gray-500 italic">Loading direct solutions...</p>
+        ) : !directSolutions || directSolutions.length === 0 ? (
+          <p className="text-sm text-gray-500 italic">No direct solutions for this problem</p>
+        ) : (
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {directSolutions.map(renderSolution)}
+          </div>
+        )}
+      </div>
+      
+      {/* Cluster Solutions */}
+      <div>
+        <div className="text-sm font-semibold text-gray-700 mb-2">
+          📊 Cluster Solutions {clusterLabel && <span className="text-xs font-normal text-gray-500">({clusterLabel})</span>}
+        </div>
+        {!clusterId ? (
+          <p className="text-sm text-gray-500 italic">This problem is not assigned to a cluster</p>
+        ) : clusterLoading ? (
+          <p className="text-sm text-gray-500 italic">Loading cluster solutions...</p>
+        ) : !clusterSolutions || clusterSolutions.length === 0 ? (
+          <p className="text-sm text-gray-500 italic">No solutions for this cluster</p>
+        ) : (
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {clusterSolutions.map(renderSolution)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProblemsTableMultiLevel() {
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_COLUMNS);
   const [expandedProblems, setExpandedProblems] = useState(new Set());
   const [expandedClusters, setExpandedClusters] = useState(new Set());
-  const [loadedSolutions, setLoadedSolutions] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
   const [apiFilters, setApiFilters] = useState({
     search: '',
@@ -98,25 +201,9 @@ function ProblemsTableMultiLevel() {
         newSet.delete(key);
       } else {
         newSet.add(key);
-        // Load solutions if not already loaded
-        if (clusterId && !loadedSolutions[clusterId]) {
-          loadSolutions(clusterId);
-        }
       }
       return newSet;
     });
-  };
-
-  const loadSolutions = async (clusterId) => {
-    try {
-      const solutions = await getSolutionsByCluster(clusterId);
-      setLoadedSolutions(prev => ({
-        ...prev,
-        [clusterId]: solutions
-      }));
-    } catch (error) {
-      console.error('Error loading solutions:', error);
-    }
   };
 
   if (isLoading) {
@@ -225,7 +312,6 @@ function ProblemsTableMultiLevel() {
               const isProblemExpanded = expandedProblems.has(problem.id);
               const clusterKey = `${problem.id}-cluster`;
               const isClusterExpanded = expandedClusters.has(clusterKey);
-              const solutions = problem.cluster_id ? loadedSolutions[problem.cluster_id] : null;
 
               return (
                 <React.Fragment key={problem.id}>
@@ -251,7 +337,12 @@ function ProblemsTableMultiLevel() {
                                 )}
                                 {problem.solution_count > 0 && (
                                   <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                                    💡 {problem.solution_count}
+                                    💡 {problem.solution_count} solution{problem.solution_count > 1 ? 's' : ''}
+                                  </span>
+                                )}
+                                {problem.project_count > 0 && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                                    🚀 {problem.project_count} project{problem.project_count > 1 ? 's' : ''}
                                   </span>
                                 )}
                               </div>
@@ -327,110 +418,31 @@ function ProblemsTableMultiLevel() {
                               </div>
                             </div>
                             
-                            {/* Cluster and Solutions Section */}
+                            {/* Solutions Section */}
                             <div>
-                              <h4 className="text-sm font-semibold text-gray-700 mb-3">Related Information</h4>
-                              
-                              {problem.cluster_id ? (
-                                <>
-                                  <div className="text-sm text-gray-600 mb-3">
-                                    Cluster: <span className="font-medium">{problem.cluster_label}</span>
-                                    {problem.cluster_similarity && (
-                                      <span className="text-xs text-gray-500 ml-2">
-                                        (Similarity: {parseFloat(problem.cluster_similarity).toFixed(3)})
-                                      </span>
-                                    )}
-                                  </div>
-                                  
-                                  <button
-                                    onClick={() => toggleCluster(problem.id, problem.cluster_id)}
-                                    className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-3"
-                                  >
-                                    <span className="text-gray-400">
-                                      {isClusterExpanded ? '▼' : '▶'}
-                                    </span>
-                                    <span>View Solutions for this Cluster</span>
-                                    {problem.solution_count > 0 && (
-                                      <span className="text-xs text-gray-500">
-                                        ({problem.solution_count} available)
-                                      </span>
-                                    )}
-                                  </button>
-                                
-                                  {/* Solutions (when expanded) */}
-                                  {isClusterExpanded && (
-                                    <div>
-                                      {!solutions ? (
-                                        <p className="text-sm text-gray-500 italic">Loading solutions...</p>
-                                      ) : solutions.length === 0 ? (
-                                        <p className="text-sm text-gray-500 italic">No solutions available for this cluster</p>
-                                      ) : (
-                                        <div className="space-y-3">
-                                        {solutions.slice(0, 5).map((solution) => (
-                                          <div key={solution.id} className="bg-white p-3 rounded border border-green-200">
-                                            <div className="flex justify-between items-start">
-                                              <div className="flex-1">
-                                                <p className="text-sm font-medium text-gray-900">{solution.title}</p>
-                                                {solution.description && (
-                                                  <p className="text-xs text-gray-600 mt-1 line-clamp-2">
-                                                    {solution.description}
-                                                  </p>
-                                                )}
-                                              </div>
-                                              {solution.overall_viability && (
-                                                <div className="ml-3 text-right">
-                                                  <div className={`text-sm font-bold ${
-                                                    solution.overall_viability >= 80 ? 'text-green-600' :
-                                                    solution.overall_viability >= 60 ? 'text-yellow-600' :
-                                                    'text-red-600'
-                                                  }`}>
-                                                    {solution.overall_viability}%
-                                                  </div>
-                                                  <div className="text-xs text-gray-500">viability</div>
-                                                </div>
-                                              )}
-                                            </div>
-                                            
-                                            <div className="flex gap-3 mt-2">
-                                              {solution.status && (
-                                                <span className={`text-xs px-2 py-0.5 rounded ${
-                                                  solution.status === 'approved' ? 'bg-green-100 text-green-800' :
-                                                  solution.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                                  'bg-gray-100 text-gray-800'
-                                                }`}>
-                                                  {solution.status}
-                                                </span>
-                                              )}
-                                              {solution.linear_project_id && (
-                                                <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-800">
-                                                  📋 Has Project
-                                                </span>
-                                              )}
-                                              {solution.tech_stack && (
-                                                <span className="text-xs text-gray-500">
-                                                  {solution.tech_stack}
-                                                </span>
-                                              )}
-                                            </div>
-                                          </div>
-                                        ))}
-                                        {solutions.length > 5 && (
-                                          <p className="text-xs text-gray-500 italic">
-                                            ...and {solutions.length - 5} more solutions
-                                          </p>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
+                              <button
+                                onClick={() => toggleCluster(problem.id, problem.cluster_id)}
+                                className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-3"
+                              >
+                                <span className="text-gray-400">
+                                  {isClusterExpanded ? '▼' : '▶'}
+                                </span>
+                                <span>Solutions</span>
+                                {problem.solution_count > 0 && (
+                                  <span className="text-xs text-gray-500">
+                                    ({problem.solution_count} total)
+                                  </span>
                                 )}
-                              </>
-                            ) : (
-                              <div className="bg-white p-3 rounded border border-gray-200">
-                                <p className="text-sm text-gray-500 italic">
-                                  This problem has not been assigned to a cluster yet.
-                                </p>
-                              </div>
-                            )}
+                              </button>
+                              
+                              {/* Expanded Solutions View */}
+                              {isClusterExpanded && (
+                                <ProblemSolutions 
+                                  problemId={problem.id}
+                                  clusterId={problem.cluster_id}
+                                  clusterLabel={problem.cluster_label}
+                                />
+                              )}
                           </div>
                           </div>
                         </div>

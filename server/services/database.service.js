@@ -22,9 +22,12 @@ class DatabaseService {
           p.cluster_label,
           p.cluster_similarity,
           p.created_at,
-          COUNT(psm.solution_id) as solution_count
+          COUNT(DISTINCT psm.solution_id) as solution_count,
+          COUNT(DISTINCT proj.id) as project_count
         FROM dreamteam.problems p
         LEFT JOIN dreamteam.problem_solution_map psm ON p.id = psm.problem_id
+        LEFT JOIN dreamteam.solutions s ON psm.solution_id = s.id
+        LEFT JOIN dreamteam.projects proj ON s.id = proj.solution_id
         WHERE 1=1
       `;
       
@@ -102,6 +105,18 @@ class DatabaseService {
     `;
     const result = await pool.query(query, [id]);
     return result.rows[0];
+  }
+  
+  async getSolutionsByProblem(problemId) {
+    const query = `
+      SELECT DISTINCT s.*
+      FROM dreamteam.solutions s
+      JOIN dreamteam.problem_solution_map psm ON s.id = psm.solution_id
+      WHERE psm.problem_id = $1
+      ORDER BY s.overall_viability DESC NULLS LAST
+    `;
+    const result = await pool.query(query, [problemId]);
+    return result.rows;
   }
 
   async getProblemsByClusterId(clusterId) {
