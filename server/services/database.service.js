@@ -1,0 +1,515 @@
+import pool from '../config/database.js';
+
+/**
+ * Database Service Layer
+ * All database queries go through here, making it easy to swap to an ORM later
+ */
+class DatabaseService {
+  // === PROBLEMS ===
+  async getProblems(filters = {}) {
+    try {
+      let query = `
+        SELECT 
+          p.id,
+          p.identifier,
+          p.title,
+          p.description,
+          p.source_url,
+          p.impact,
+          p.industry,
+          p.business_size,
+          p.cluster_id,
+          p.cluster_label,
+          p.cluster_similarity,
+          p.created_at,
+          COUNT(psm.solution_id) as solution_count
+        FROM dreamteam.problems p
+        LEFT JOIN dreamteam.problem_solution_map psm ON p.id = psm.problem_id
+        WHERE 1=1
+      `;
+      
+      const values = [];
+      let paramCount = 0;
+
+      // Add filters dynamically
+      if (filters.cluster_id) {
+        query += ` AND p.cluster_id = $${++paramCount}`;
+        values.push(filters.cluster_id);
+      }
+      
+      if (filters.cluster_label) {
+        query += ` AND p.cluster_label = $${++paramCount}`;
+        values.push(filters.cluster_label);
+      }
+      
+      if (filters.impact) {
+        query += ` AND p.impact = $${++paramCount}`;
+        values.push(filters.impact);
+      }
+      
+      if (filters.industry) {
+        query += ` AND p.industry = $${++paramCount}`;
+        values.push(filters.industry);
+      }
+      
+      if (filters.business_size) {
+        query += ` AND p.business_size = $${++paramCount}`;
+        values.push(filters.business_size);
+      }
+      
+      if (filters.search) {
+        query += ` AND (p.title ILIKE $${++paramCount} OR p.description ILIKE $${paramCount})`;
+        values.push(`%${filters.search}%`);
+      }
+      
+      if (filters.has_solutions !== undefined) {
+        if (filters.has_solutions === 'true' || filters.has_solutions === true) {
+          query += ` AND EXISTS (SELECT 1 FROM dreamteam.problem_solution_map WHERE problem_id = p.id)`;
+        } else if (filters.has_solutions === 'false' || filters.has_solutions === false) {
+          query += ` AND NOT EXISTS (SELECT 1 FROM dreamteam.problem_solution_map WHERE problem_id = p.id)`;
+        }
+      }
+
+      query += ` GROUP BY p.id`;
+      
+      // Add sorting
+      const sortField = filters.sortBy || 'created_at';
+      const sortOrder = filters.sortOrder || 'DESC';
+      const validSortFields = ['title', 'impact', 'industry', 'created_at', 'solution_count', 'cluster_label'];
+      
+      if (validSortFields.includes(sortField)) {
+        if (sortField === 'solution_count') {
+          query += ` ORDER BY solution_count ${sortOrder === 'ASC' ? 'ASC' : 'DESC'}`;
+        } else {
+          query += ` ORDER BY p.${sortField} ${sortOrder === 'ASC' ? 'ASC' : 'DESC'}`;
+        }
+      } else {
+        query += ` ORDER BY p.created_at DESC`;
+      }
+      
+      const result = await pool.query(query, values);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching problems:', error);
+      throw error;
+    }
+  }
+
+  async getProblemById(id) {
+    const query = `
+      SELECT * FROM dreamteam.problems 
+      WHERE id = $1
+    `;
+    const result = await pool.query(query, [id]);
+    return result.rows[0];
+  }
+
+  async getProblemsByClusterId(clusterId) {
+    try {
+      const query = `
+        SELECT 
+          p.id,
+          p.identifier,
+          p.title,
+          p.description,
+          p.impact,
+          p.industry,
+          p.business_size,
+          p.cluster_similarity,
+          p.created_at,
+          COUNT(psm.solution_id) as solution_count
+        FROM dreamteam.problems p
+        LEFT JOIN dreamteam.problem_solution_map psm ON p.id = psm.problem_id
+        WHERE p.cluster_id = $1
+        GROUP BY p.id
+        ORDER BY p.cluster_similarity DESC NULLS LAST
+      `;
+      const result = await pool.query(query, [clusterId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching problems by cluster:', error);
+      throw error;
+    }
+  }
+
+  // === CLUSTERS ===
+  async getClusters(filters = {}) {
+    try {
+      let baseQuery;
+      let params = [];
+      let paramCount = 0;
+      
+      if (filters.version) {
+        baseQuery = `
+          WITH cluster_data AS (
+            SELECT 
+              c.cluster_id,
+              c.cluster_label,
+              c.avg_similarity,
+              c.is_outlier_bucket,
+              COUNT(p.id) as problem_count,
+              COUNT(DISTINCT s.id) as solution_count
+            FROM dreamteam.cluster_centroids c
+            LEFT JOIN dreamteam.problems p ON p.cluster_id = c.cluster_id
+            LEFT JOIN dreamteam.solutions s ON s.source_cluster_id = c.cluster_id
+            WHERE c.version = $${++paramCount}
+              AND c.is_outlier_bucket = false
+        `;
+        params.push(filters.version);
+      } else {
+        baseQuery = `
+          WITH active_version AS (
+            SELECT COALESCE(
+              (SELECT version FROM dreamteam.cluster_versions WHERE is_active = true),
+              (SELECT MAX(version) FROM dreamteam.cluster_centroids)
+            ) as version
+          ),
+          cluster_data AS (
+            SELECT 
+              c.cluster_id,
+              c.cluster_label,
+              c.avg_similarity,
+              c.is_outlier_bucket,
+              COUNT(p.id) as problem_count,
+              COUNT(DISTINCT s.id) as solution_count
+            FROM dreamteam.cluster_centroids c
+            LEFT JOIN dreamteam.problems p ON p.cluster_id = c.cluster_id
+            LEFT JOIN dreamteam.solutions s ON s.source_cluster_id = c.cluster_id
+            WHERE c.version = (SELECT version FROM active_version)
+              AND c.is_outlier_bucket = false
+        `;
+      }
+      
+      // Add GROUP BY first
+      baseQuery += `
+            GROUP BY c.cluster_id, c.cluster_label, 
+                     c.avg_similarity, c.is_outlier_bucket
+      `;
+      
+      // Add HAVING filters after GROUP BY
+      let havingClauses = [];
+      
+      if (filters.has_solutions !== undefined) {
+        if (filters.has_solutions === 'true' || filters.has_solutions === true) {
+          havingClauses.push('COUNT(DISTINCT s.id) > 0');
+        } else if (filters.has_solutions === 'false' || filters.has_solutions === false) {
+          havingClauses.push('COUNT(DISTINCT s.id) = 0');
+        }
+      }
+      
+      if (filters.min_problems) {
+        havingClauses.push(`COUNT(p.id) >= $${++paramCount}`);
+        params.push(parseInt(filters.min_problems));
+      }
+      
+      if (havingClauses.length > 0) {
+        baseQuery += ` HAVING ${havingClauses.join(' AND ')}`;
+      }
+      
+      baseQuery += `
+          )
+          SELECT * FROM cluster_data
+      `;
+      
+      // Add search filter
+      if (filters.search) {
+        baseQuery += ` WHERE cluster_label ILIKE $${++paramCount}`;
+        params.push(`%${filters.search}%`);
+      }
+      
+      // Add sorting
+      const sortField = filters.sortBy || 'problem_count';
+      const sortOrder = filters.sortOrder || 'DESC';
+      const validSortFields = ['cluster_label', 'problem_count', 'solution_count', 'avg_similarity'];
+      
+      if (validSortFields.includes(sortField)) {
+        baseQuery += ` ORDER BY ${sortField} ${sortOrder === 'ASC' ? 'ASC' : 'DESC'}`;
+      } else {
+        baseQuery += ` ORDER BY problem_count DESC`;
+      }
+      
+      const result = await pool.query(baseQuery, params);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching clusters:', error);
+      throw error;
+    }
+  }
+
+  async getProblemsBySolutionId(solutionId) {
+    try {
+      const query = `
+        SELECT 
+          p.id,
+          p.identifier,
+          p.title,
+          p.description,
+          p.impact,
+          p.industry,
+          p.business_size,
+          p.cluster_id,
+          p.cluster_label,
+          p.created_at
+        FROM dreamteam.problems p
+        INNER JOIN dreamteam.problem_solution_map psm ON p.id = psm.problem_id
+        WHERE psm.solution_id = $1
+        ORDER BY p.impact DESC, p.created_at DESC
+      `;
+      const result = await pool.query(query, [solutionId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching problems by solution:', error);
+      throw error;
+    }
+  }
+
+  // === SOLUTIONS ===
+  async getSolutions(filters = {}) {
+    try {
+      let query = `
+        SELECT 
+          s.id,
+          s.identifier,
+          s.title,
+          s.description,
+          s.value_proposition,
+          s.primary_feature,
+          s.overall_viability,
+          s.technical_feasibility,
+          s.market_demand,
+          s.competitive_advantage,
+          s.ltv_estimate,
+          s.cac_estimate,
+          s.recurring_revenue_potential,
+          s.source_cluster_id,
+          s.source_cluster_label,
+          s.linear_project_id,
+          s.github_repo_url,
+          s.created_at,
+          s.status,
+          COUNT(psm.problem_id) as problem_count
+        FROM dreamteam.solutions s
+        LEFT JOIN dreamteam.problem_solution_map psm ON s.id = psm.solution_id
+        WHERE 1=1
+      `;
+      
+      const values = [];
+      let paramCount = 0;
+
+      if (filters.cluster_id) {
+        query += ` AND s.source_cluster_id = $${++paramCount}`;
+        values.push(filters.cluster_id);
+      }
+      
+      if (filters.status) {
+        query += ` AND s.status = $${++paramCount}`;
+        values.push(filters.status);
+      }
+      
+      if (filters.min_viability) {
+        query += ` AND s.overall_viability >= $${++paramCount}`;
+        values.push(parseFloat(filters.min_viability));
+      }
+      
+      if (filters.search) {
+        query += ` AND (s.title ILIKE $${++paramCount} OR s.description ILIKE $${paramCount} OR s.value_proposition ILIKE $${paramCount})`;
+        values.push(`%${filters.search}%`);
+      }
+
+      if (filters.has_project !== undefined) {
+        if (filters.has_project === 'true' || filters.has_project === true) {
+          query += ` AND s.linear_project_id IS NOT NULL`;
+        } else if (filters.has_project === 'false' || filters.has_project === false) {
+          query += ` AND s.linear_project_id IS NULL`;
+        }
+      }
+
+      query += ` GROUP BY s.id`;
+      
+      // Add sorting
+      const sortField = filters.sortBy || 'overall_viability';
+      const sortOrder = filters.sortOrder || 'DESC';
+      const validSortFields = ['title', 'overall_viability', 'status', 'created_at', 'ltv_estimate', 'recurring_revenue_potential', 'problem_count'];
+      
+      if (validSortFields.includes(sortField)) {
+        if (sortField === 'problem_count') {
+          query += ` ORDER BY problem_count ${sortOrder === 'ASC' ? 'ASC' : 'DESC'} NULLS LAST`;
+        } else {
+          query += ` ORDER BY s.${sortField} ${sortOrder === 'ASC' ? 'ASC' : 'DESC'} NULLS LAST`;
+        }
+      } else {
+        query += ` ORDER BY s.overall_viability DESC NULLS LAST`;
+      }
+      
+      const result = await pool.query(query, values);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching solutions:', error);
+      throw error;
+    }
+  }
+
+  // === PIPELINE STATS ===
+  async getPipelineStats() {
+    try {
+      const query = `
+        WITH stats AS (
+          SELECT 
+            (SELECT COUNT(*) FROM dreamteam.problems) as total_problems,
+            (SELECT COUNT(*) FROM dreamteam.problems WHERE cluster_id IS NULL) as unclustered_problems,
+            (SELECT COUNT(*) FROM dreamteam.solutions) as total_solutions,
+            (SELECT COUNT(*) FROM dreamteam.solutions WHERE linear_project_id IS NOT NULL) as active_projects,
+            (SELECT COUNT(DISTINCT cluster_id) FROM dreamteam.cluster_centroids 
+             WHERE version = (SELECT version FROM dreamteam.cluster_versions WHERE is_active = true)
+             AND is_outlier_bucket = false) as total_clusters,
+            (SELECT COUNT(DISTINCT problem_id) FROM dreamteam.problem_solution_map) as problems_with_solutions
+        )
+        SELECT * FROM stats
+      `;
+      
+      const result = await pool.query(query);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error fetching pipeline stats:', error);
+      throw error;
+    }
+  }
+
+  // === PROJECTS ===
+  async getProjects() {
+    try {
+      const query = `
+        SELECT 
+          p.id,
+          p.name,
+          p.status,
+          p.solution_id,
+          s.title as solution_title,
+          s.overall_viability,
+          s.linear_project_id,
+          s.github_repo_url,
+          p.created_at
+        FROM dreamteam.projects p
+        LEFT JOIN dreamteam.solutions s ON p.solution_id = s.id
+        ORDER BY p.created_at DESC
+      `;
+      
+      const result = await pool.query(query);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching projects:', error);
+      throw error;
+    }
+  }
+
+  // === FILTER OPTIONS ===
+  async getProblemsFilterOptions() {
+    try {
+      const query = `
+        SELECT 
+          ARRAY_AGG(DISTINCT impact ORDER BY impact) FILTER (WHERE impact IS NOT NULL) as impacts,
+          ARRAY_AGG(DISTINCT industry ORDER BY industry) FILTER (WHERE industry IS NOT NULL) as industries,
+          ARRAY_AGG(DISTINCT business_size ORDER BY business_size) FILTER (WHERE business_size IS NOT NULL) as business_sizes,
+          ARRAY_AGG(DISTINCT cluster_label ORDER BY cluster_label) FILTER (WHERE cluster_label IS NOT NULL) as cluster_labels
+        FROM dreamteam.problems
+      `;
+      const result = await pool.query(query);
+      
+      // Parse PostgreSQL array strings if needed
+      const options = result.rows[0];
+      const parseArray = (val) => {
+        if (!val) return [];
+        if (Array.isArray(val)) return val;
+        // Parse PostgreSQL array string format: "{item1,item2,item3}"
+        if (typeof val === 'string' && val.startsWith('{') && val.endsWith('}')) {
+          return val.slice(1, -1).split(',');
+        }
+        return [];
+      };
+      
+      return {
+        impacts: parseArray(options.impacts),
+        industries: options.industries || [],
+        business_sizes: options.business_sizes || [],
+        cluster_labels: options.cluster_labels || []
+      };
+    } catch (error) {
+      console.error('Error fetching problem filter options:', error);
+      throw error;
+    }
+  }
+
+  async getClustersFilterOptions() {
+    try {
+      const query = `
+        WITH active_version AS (
+          SELECT COALESCE(
+            (SELECT version FROM dreamteam.cluster_versions WHERE is_active = true),
+            (SELECT MAX(version) FROM dreamteam.cluster_centroids)
+          ) as version
+        )
+        SELECT 
+          ARRAY_AGG(DISTINCT cluster_label ORDER BY cluster_label) FILTER (WHERE cluster_label IS NOT NULL) as cluster_labels
+        FROM dreamteam.cluster_centroids
+        WHERE version = (SELECT version FROM active_version)
+          AND is_outlier_bucket = false
+      `;
+      const result = await pool.query(query);
+      
+      // Ensure arrays are properly formatted
+      const options = result.rows[0];
+      return {
+        cluster_labels: options.cluster_labels || []
+      };
+    } catch (error) {
+      console.error('Error fetching cluster filter options:', error);
+      throw error;
+    }
+  }
+
+  async getSolutionsFilterOptions() {
+    try {
+      const query = `
+        SELECT 
+          ARRAY_AGG(DISTINCT status ORDER BY status) FILTER (WHERE status IS NOT NULL) as statuses,
+          ARRAY_AGG(DISTINCT source_cluster_label ORDER BY source_cluster_label) FILTER (WHERE source_cluster_label IS NOT NULL) as cluster_labels
+        FROM dreamteam.solutions
+      `;
+      const result = await pool.query(query);
+      
+      // Parse PostgreSQL array strings if needed
+      const options = result.rows[0];
+      const parseArray = (val) => {
+        if (!val) return [];
+        if (Array.isArray(val)) return val;
+        // Parse PostgreSQL array string format: "{item1,item2,item3}"
+        if (typeof val === 'string' && val.startsWith('{') && val.endsWith('}')) {
+          return val.slice(1, -1).split(',');
+        }
+        return [];
+      };
+      
+      return {
+        statuses: parseArray(options.statuses),
+        cluster_labels: options.cluster_labels || []
+      };
+    } catch (error) {
+      console.error('Error fetching solution filter options:', error);
+      throw error;
+    }
+  }
+
+  // === UTILITY ===
+  async executeQuery(sql, params = []) {
+    // For future custom queries - use with caution
+    try {
+      const result = await pool.query(sql, params);
+      return result.rows;
+    } catch (error) {
+      console.error('Error executing query:', error);
+      throw error;
+    }
+  }
+}
+
+export default new DatabaseService();

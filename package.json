@@ -1,0 +1,26 @@
+{
+  "name": "dreamteam-studio-v2",
+  "version": "2.0.0",
+  "description": "Control center for DreamTeam Virtual Software House - PostgreSQL/n8n native",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "server:dev": "nodemon server/index.js",
+    "client:dev": "cd client && npm run dev",
+    "server:start": "node server/index.js",
+    "client:build": "cd client && npm run build",
+    "build": "npm run client:build",
+    "start": "npm run server:start",
+    "setup": "npm install && cd client && npm install"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.1.4"
+  }
+}

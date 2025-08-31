@@ -1,0 +1,194 @@
+/* Custom scrollbar styles for tables */
+.table-container {
+  position: relative;
+  max-width: 100%;
+}
+
+/* Top scrollbar container */
+.table-scroll-top {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-bottom: 0;
+  height: 20px;
+  
+  /* Custom scrollbar for Webkit browsers */
+  scrollbar-width: thin;
+  scrollbar-color: #9ca3af #f3f4f6;
+}
+
+.table-scroll-top::-webkit-scrollbar {
+  height: 12px;
+}
+
+.table-scroll-top::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 4px;
+}
+
+.table-scroll-top::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+  border-radius: 4px;
+}
+
+.table-scroll-top::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+.table-scroll-top-inner {
+  height: 1px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  max-width: 100%;
+  
+  /* Custom scrollbar for Webkit browsers */
+  scrollbar-width: thin;
+  scrollbar-color: #9ca3af #f3f4f6;
+}
+
+.table-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.table-scroll::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 4px;
+}
+
+.table-scroll::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+  border-radius: 4px;
+}
+
+.table-scroll::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* Shadow indicators for horizontal scroll */
+.table-scroll-indicator {
+  position: relative;
+}
+
+.table-scroll-indicator::before,
+.table-scroll-indicator::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  pointer-events: none;
+  z-index: 1;
+  transition: opacity 0.3s;
+}
+
+.table-scroll-indicator::before {
+  left: 0;
+  background: linear-gradient(to right, rgba(255,255,255,1), rgba(255,255,255,0));
+}
+
+.table-scroll-indicator::after {
+  right: 0;
+  background: linear-gradient(to left, rgba(255,255,255,1), rgba(255,255,255,0));
+}
+
+.table-scroll-indicator.can-scroll-left::before {
+  box-shadow: inset 10px 0 8px -8px rgba(0,0,0,0.15);
+}
+
+.table-scroll-indicator.can-scroll-right::after {
+  box-shadow: inset -10px 0 8px -8px rgba(0,0,0,0.15);
+}
+
+/* Ensure table has minimum width for proper scrolling */
+.data-table {
+  min-width: 100%;
+  table-layout: fixed; /* Use fixed layout for better column width control */
+}
+
+/* Make column headers sticky when scrolling horizontally */
+.sticky-header th {
+  position: sticky;
+  top: 0;
+  background: inherit;
+  z-index: 10;
+}
+
+/* Resizable columns */
+.resizable-header {
+  position: relative;
+  user-select: none;
+}
+
+.column-resizer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+.column-resizer:hover,
+.column-resizer.resizing {
+  background: rgba(59, 130, 246, 0.5);
+}
+
+.column-resizer.resizing {
+  background: rgba(59, 130, 246, 0.8);
+}
+
+/* Minimum column widths */
+.data-table th {
+  min-width: 100px;
+  position: relative;
+}
+
+.data-table th.column-resizing {
+  cursor: col-resize;
+}
+
+/* Prevent text selection while resizing */
+.table-container.resizing {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Better text wrapping in cells */
+.data-table td {
+  word-wrap: break-word;
+  word-break: break-word;
+  white-space: normal;
+  vertical-align: top;
+  max-width: 300px; /* Prevent cells from becoming too wide */
+}
+
+.data-table th {
+  word-wrap: break-word;
+  word-break: normal;
+  white-space: nowrap; /* Keep headers on one line */
+}
+
+/* Special handling for title/description columns */
+.cell-title {
+  min-width: 200px;
+  max-width: 400px;
+}
+
+.cell-description {
+  min-width: 250px;
+  max-width: 500px;
+  line-height: 1.4;
+}
+
+/* Truncate long text with ellipsis option */
+.cell-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
