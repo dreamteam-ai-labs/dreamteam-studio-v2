@@ -1,9 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, memo, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getProjects, getSolutions, getProblemsBySolution, getProblemsByCluster } from '../services/api';
+import ColumnSelector from './ColumnSelector';
+import TableHeader from './TableHeader';
+import { useTableFeatures } from '../hooks/useTableFeatures';
+import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
+import '../styles/tables.css';
+
+// Use centralized column definitions
+const ALL_COLUMNS = TAB_COLUMNS.projects;
+const DEFAULT_COLUMNS = DEFAULT_VISIBLE_COLUMNS.projects;
 
 // Project row component with full journey view
-function ProjectRow({ project, solution }) {
+function ProjectRow({ project, solution, visibleColumns }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Fetch problems directly linked to solution
@@ -22,12 +31,9 @@ function ProjectRow({ project, solution }) {
 
   return (
     <>
-      <tr className="hover:bg-gray-50">
-        <td className="px-4 py-3">
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="text-left w-full"
-          >
+      <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
+        {visibleColumns.includes('name') && (
+          <td className="px-4 py-3" style={{ minWidth: '350px' }}>
             <div className="flex items-start gap-2">
               <span className="text-gray-400 mt-0.5">
                 {isExpanded ? '▼' : '▶'}
@@ -58,51 +64,56 @@ function ProjectRow({ project, solution }) {
                 </div>
               </div>
             </div>
-          </button>
-        </td>
-        <td className="px-4 py-3">
-          {project.github_repo_url ? (
-            <a
-              href={project.github_repo_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
-            >
-              Open Repository
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </a>
-          ) : (
-            <span className="text-sm text-gray-400">No repo yet</span>
-          )}
-        </td>
-        <td className="px-4 py-3">
-          {project.linear_project_id ? (
-            <a
-              href={`https://linear.app/dreamteam-ai-labs/project/${project.linear_project_id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
-            >
-              View Project
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </a>
-          ) : (
-            <span className="text-sm text-gray-400">No Linear project</span>
-          )}
-        </td>
-        <td className="px-4 py-3">
-          {project.overall_viability ? (
-            <div className="flex items-center gap-2">
-              <div className={`text-sm font-bold ${
-                project.overall_viability >= 80 ? 'text-green-600' :
-                project.overall_viability >= 60 ? 'text-yellow-600' :
-                'text-red-600'
-              }`}>
-                {project.overall_viability}%
+          </td>
+        )}
+        {visibleColumns.includes('github') && (
+          <td className="px-4 py-3 text-center" style={{ width: '150px' }} onClick={(e) => e.stopPropagation()}>
+            {project.github_repo_url ? (
+              <a
+                href={project.github_repo_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
+              >
+                Open Repository
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            ) : (
+              <span className="text-sm text-gray-400">No repo yet</span>
+            )}
+          </td>
+        )}
+        {visibleColumns.includes('linear') && (
+          <td className="px-4 py-3 text-center" style={{ width: '150px' }} onClick={(e) => e.stopPropagation()}>
+            {project.linear_project_id ? (
+              <a
+                href={`https://linear.app/dreamteam-ai-labs/project/${project.linear_project_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
+              >
+                View Project
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            ) : (
+              <span className="text-sm text-gray-400">No Linear project</span>
+            )}
+          </td>
+        )}
+        {visibleColumns.includes('viability') && (
+          <td className="px-4 py-3 text-center" style={{ width: '120px' }}>
+            {project.overall_viability ? (
+              <div className="flex items-center justify-center gap-2">
+                <div className={`text-sm font-bold ${
+                  project.overall_viability >= 80 ? 'text-green-600' :
+                  project.overall_viability >= 60 ? 'text-yellow-600' :
+                  'text-red-600'
+                }`}>
+                  {project.overall_viability}%
               </div>
               <div className="w-16 bg-gray-200 rounded-full h-1.5">
                 <div 
@@ -119,26 +130,31 @@ function ProjectRow({ project, solution }) {
             <span className="text-sm text-gray-400">-</span>
           )}
         </td>
-        <td className="px-4 py-3">
-          <span className={`inline-flex px-2 py-1 text-xs rounded-full ${
-            project.status === 'active' ? 'bg-green-100 text-green-800' :
-            project.status === 'development' ? 'bg-blue-100 text-blue-800' :
-            project.status === 'maintenance' ? 'bg-yellow-100 text-yellow-800' :
-            project.status === 'archived' ? 'bg-gray-100 text-gray-800' :
-            'bg-purple-100 text-purple-800'
-          }`}>
-            {project.status || 'launched'}
-          </span>
-        </td>
-        <td className="px-4 py-3 text-sm text-gray-500">
-          {new Date(project.created_at).toLocaleDateString()}
-        </td>
+        )}
+        {visibleColumns.includes('status') && (
+          <td className="px-4 py-3 text-center" style={{ width: '100px' }}>
+            <span className={`inline-flex px-2 py-1 text-xs rounded-full ${
+              project.status === 'active' ? 'bg-green-100 text-green-800' :
+              project.status === 'development' ? 'bg-blue-100 text-blue-800' :
+              project.status === 'maintenance' ? 'bg-yellow-100 text-yellow-800' :
+              project.status === 'archived' ? 'bg-gray-100 text-gray-800' :
+              'bg-purple-100 text-purple-800'
+            }`}>
+              {project.status || 'launched'}
+            </span>
+          </td>
+        )}
+        {visibleColumns.includes('created') && (
+          <td className="px-4 py-3 text-sm text-gray-500 text-center" style={{ width: '120px' }}>
+            {new Date(project.created_at).toLocaleDateString()}
+          </td>
+        )}
       </tr>
       
       {/* Expanded Details with Full Journey */}
       {isExpanded && (
         <tr>
-          <td colSpan={6} className="px-6 py-0">
+          <td colSpan={visibleColumns.length} className="px-6 py-0">
             <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 mb-4 rounded">
               <div className="space-y-4">
                 {/* Solution Details */}
@@ -283,6 +299,29 @@ function ProjectRow({ project, solution }) {
 }
 
 function ProjectsTable() {
+  // Load saved column preferences or use defaults
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    const saved = localStorage.getItem('projects-visible-columns');
+    return saved ? JSON.parse(saved) : DEFAULT_COLUMNS;
+  });
+  
+  // Save column preferences when they change
+  useEffect(() => {
+    localStorage.setItem('projects-visible-columns', JSON.stringify(visibleColumns));
+  }, [visibleColumns]);
+
+  const {
+    scrollRef,
+    topScrollRef,
+    scrollIndicators,
+    columnWidths,
+    isResizing,
+    handleTopScroll,
+    handleBottomScroll,
+    handleMouseDown,
+    updateTopScrollWidth
+  } = useTableFeatures(visibleColumns, useMemo(() => getInitialColumnWidths('projects'), []));
+
   // Fetch projects
   const { data: projects, isLoading: projectsLoading } = useQuery({
     queryKey: ['projects'],
@@ -295,6 +334,16 @@ function ProjectsTable() {
     queryKey: ['all-solutions'],
     queryFn: () => getSolutions({}),
   });
+
+  const handleColumnChange = useCallback((newColumns) => {
+    // Ensure name column is always visible
+    if (!newColumns.includes('name')) {
+      newColumns = ['name', ...newColumns];
+    }
+    setVisibleColumns(newColumns);
+    // Update top scroll width after columns change
+    setTimeout(updateTopScrollWidth, 0);
+  }, [updateTopScrollWidth]);
 
   if (projectsLoading) {
     return <div className="text-center py-4">Loading projects...</div>;
@@ -322,56 +371,71 @@ function ProjectsTable() {
               Successfully launched products from the DreamTeam pipeline
             </p>
           </div>
+          <ColumnSelector 
+            columns={ALL_COLUMNS}
+            selectedColumns={visibleColumns}
+            onColumnChange={handleColumnChange}
+          />
         </div>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                Product Name
-              </th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                GitHub Repository
-              </th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                Linear Project
-              </th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                Viability Score
-              </th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                Status
-              </th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                Created
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {projectsWithDetails?.length === 0 ? (
+      <div className={`bg-white rounded-lg shadow table-container ${isResizing ? 'resizing' : ''}`}>
+        {/* Top scrollbar */}
+        <div 
+          ref={topScrollRef}
+          className="table-scroll-top"
+          onScroll={handleTopScroll}
+        >
+          <div className="table-scroll-top-inner" />
+        </div>
+        
+        {/* Main table container */}
+        <div 
+          ref={scrollRef}
+          className={`table-scroll table-scroll-indicator ${scrollIndicators.left ? 'can-scroll-left' : ''} ${scrollIndicators.right ? 'can-scroll-right' : ''}`}
+          onScroll={handleBottomScroll}
+        >
+          <table className="data-table divide-y divide-gray-200">
+            <thead className="bg-gray-50">
               <tr>
-                <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                  <div className="flex flex-col items-center">
-                    <span className="text-4xl mb-2">🚀</span>
-                    <p className="text-lg font-medium">No products launched yet</p>
-                    <p className="text-sm mt-1">Products will appear here once solutions are converted to projects</p>
-                  </div>
-                </td>
+                {ALL_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(column => (
+                  <TableHeader
+                    key={column.key}
+                    column={column}
+                    sortBy={null}
+                    sortOrder={null}
+                    onSort={() => {}}
+                    columnWidth={columnWidths[column.key]}
+                    onMouseDown={handleMouseDown}
+                  />
+                ))}
               </tr>
-            ) : (
-              projectsWithDetails?.map((project) => (
-                <ProjectRow 
-                  key={project.id} 
-                  project={project} 
-                  solution={project.solution_details}
-                />
-              ))
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {projectsWithDetails?.length === 0 ? (
+                <tr>
+                  <td colSpan={visibleColumns.length} className="px-6 py-8 text-center text-gray-500">
+                    <div className="flex flex-col items-center">
+                      <span className="text-4xl mb-2">🚀</span>
+                      <p className="text-lg font-medium">No products launched yet</p>
+                      <p className="text-sm mt-1">Products will appear here once solutions are converted to projects</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                projectsWithDetails?.map((project) => (
+                  <ProjectRow 
+                    key={project.id} 
+                    project={project} 
+                    solution={project.solution_details}
+                    visibleColumns={visibleColumns}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

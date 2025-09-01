@@ -1,28 +1,20 @@
-import { useState, useCallback, memo } from 'react';
+import { useState, useCallback, memo, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getSolutions, getProblemsBySolution, getProblemsByCluster, getSolutionsFilterOptions } from '../services/api';
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
+import TableHeader from './TableHeader';
 import { useTableFeatures } from '../hooks/useTableFeatures';
+import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
 import '../styles/tables.css';
 
-// Define all available columns
-const ALL_COLUMNS = [
-  { key: 'title', label: 'Title & Feature', required: true },
-  { key: 'overall_viability', label: 'Viability', required: false },
-  { key: 'ltv_cac', label: 'LTV/CAC', required: false },
-  { key: 'revenue', label: 'Revenue Potential', required: false },
-  { key: 'source_cluster', label: 'Source Cluster', required: false },
-  { key: 'problem_count', label: 'Problems', required: false },
-  { key: 'status', label: 'Status', required: false },
-  { key: 'project', label: 'Project', required: false },
-];
-
-// Default visible columns
-const DEFAULT_COLUMNS = ['title', 'overall_viability', 'revenue', 'status', 'project'];
+// Use centralized column definitions
+const ALL_COLUMNS = TAB_COLUMNS.solutions;
+const DEFAULT_COLUMNS = DEFAULT_VISIBLE_COLUMNS.solutions;
 
 // Memoized filters section
 const FiltersSection = memo(function FiltersSection({ 
+  searchTerm,
   onSearchChange, 
   apiFilters, 
   onFilterChange, 
@@ -48,6 +40,7 @@ const FiltersSection = memo(function FiltersSection({
             Search
           </label>
           <SearchInput 
+            value={searchTerm}
             onSearchChange={onSearchChange}
             placeholder="Search solutions..."
           />
@@ -140,13 +133,10 @@ function SolutionRow({ solution, visibleColumns }) {
 
   return (
     <>
-      <tr className="hover:bg-gray-50">
+      <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
         {visibleColumns.includes('title') && (
-          <td className="px-6 py-4 cell-title">
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="flex items-start gap-2 text-left w-full"
-            >
+          <td className="px-6 py-4 cell-title" style={{ minWidth: '400px' }}>
+            <div className="flex items-start gap-2">
               <span className="text-gray-400 mt-1 flex-shrink-0">
                 {isExpanded ? '▼' : '▶'}
               </span>
@@ -175,13 +165,13 @@ function SolutionRow({ solution, visibleColumns }) {
                   )}
                 </div>
               </div>
-            </button>
+            </div>
           </td>
         )}
         
         {visibleColumns.includes('overall_viability') && (
-          <td className="px-6 py-4">
-            <div className="flex items-center">
+          <td className="px-6 py-4 text-center" style={{ width: '120px' }}>
+            <div className="flex items-center justify-center">
               <div className="text-sm font-medium text-gray-900">
                 {solution.overall_viability || 'N/A'}
               </div>
@@ -198,7 +188,7 @@ function SolutionRow({ solution, visibleColumns }) {
         )}
         
         {visibleColumns.includes('ltv_cac') && (
-          <td className="px-6 py-4 text-sm text-gray-900">
+          <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '140px' }}>
             {solution.ltv_estimate && solution.cac_estimate ? 
               `£${(solution.ltv_estimate / 1000).toFixed(0)}k / £${(solution.cac_estimate / 1000).toFixed(0)}k` : 
               'N/A'
@@ -207,7 +197,7 @@ function SolutionRow({ solution, visibleColumns }) {
         )}
         
         {visibleColumns.includes('revenue') && (
-          <td className="px-6 py-4 text-sm text-gray-900">
+          <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '100px' }}>
             {solution.recurring_revenue_potential ? 
               `£${(solution.recurring_revenue_potential / 1000000).toFixed(1)}M` : 
               'N/A'
@@ -216,19 +206,19 @@ function SolutionRow({ solution, visibleColumns }) {
         )}
         
         {visibleColumns.includes('source_cluster') && (
-          <td className="px-6 py-4 text-sm text-gray-900">
+          <td className="px-6 py-4 text-sm text-gray-900" style={{ width: '200px' }}>
             {solution.source_cluster_label || 'N/A'}
           </td>
         )}
         
         {visibleColumns.includes('problem_count') && (
-          <td className="px-6 py-4 text-sm text-gray-900">
+          <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '100px' }}>
             {solution.problem_count || 0}
           </td>
         )}
         
         {visibleColumns.includes('status') && (
-          <td className="px-6 py-4">
+          <td className="px-6 py-4 text-center" style={{ width: '100px' }}>
             <span className={`inline-flex px-2 py-1 text-xs rounded-full ${
               solution.status === 'launched' ? 'bg-green-100 text-green-800' :
               solution.status === 'selected' ? 'bg-blue-100 text-blue-800' :
@@ -241,7 +231,7 @@ function SolutionRow({ solution, visibleColumns }) {
         )}
         
         {visibleColumns.includes('project') && (
-          <td className="px-6 py-4 text-sm">
+          <td className="px-6 py-4 text-sm text-center" style={{ width: '100px' }}>
             {solution.linear_project_id ? (
               <span className="text-primary-600">✓ Linear</span>
             ) : (
@@ -300,7 +290,10 @@ function SolutionRow({ solution, visibleColumns }) {
                           {/* Directly Mapped Problems */}
                           <div>
                             <div className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                              🎯 Directly Mapped Problems ({directProblems?.length || 0})
+                              🎯 Problems This Solution Addresses ({directProblems?.length || 0})
+                              <span className="text-xs font-normal text-gray-500" title="High-relevance problems (similarity ≥ 0.55) that were specifically selected when this solution was created">
+                                ⓘ
+                              </span>
                             </div>
                             {directLoading ? (
                               <div className="text-sm text-gray-500">Loading...</div>
@@ -334,12 +327,22 @@ function SolutionRow({ solution, visibleColumns }) {
                           {/* Cluster Problems */}
                           <div>
                             <div className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                              📊 Cluster Problems ({clusterProblems?.length || 0})
+                              📊 Current Cluster Contents ({clusterProblems?.length || 0})
+                              <span className="text-xs font-normal text-gray-500" title="All problems currently in the source cluster. May be empty if problems were re-clustered after this solution was created.">
+                                ⓘ
+                              </span>
                             </div>
                             {clusterLoading ? (
                               <div className="text-sm text-gray-500">Loading cluster problems...</div>
                             ) : clusterProblems?.length === 0 ? (
-                              <div className="text-sm text-gray-500 italic">No problems in source cluster</div>
+                              <div className="text-sm text-gray-500 italic bg-gray-50 p-3 rounded">
+                                <div className="font-medium mb-1">Cluster has been re-organized</div>
+                                <div className="text-xs">
+                                  The original cluster "{solution.source_cluster_label}" no longer contains problems 
+                                  (likely due to re-clustering). The problems this solution addresses are preserved 
+                                  in the left column.
+                                </div>
+                              </div>
                             ) : (
                               <div className="space-y-2 max-h-96 overflow-y-auto">
                                 {clusterProblems?.map((problem) => (
@@ -371,8 +374,11 @@ function SolutionRow({ solution, visibleColumns }) {
                     <div>
                       {directProblems?.length > 0 ? (
                         <>
-                          <div className="text-sm font-semibold text-gray-700 mb-2">
-                            Directly Mapped Problems ({directProblems.length})
+                          <div className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                            🎯 Problems This Solution Addresses ({directProblems.length})
+                            <span className="text-xs font-normal text-gray-500" title="Problems specifically selected for this solution">
+                              ⓘ
+                            </span>
                           </div>
                           <div className="space-y-2">
                             {directProblems.map((problem) => (
@@ -405,7 +411,18 @@ function SolutionRow({ solution, visibleColumns }) {
 }
 
 function SolutionsTable() {
-  const [visibleColumns, setVisibleColumns] = useState(DEFAULT_COLUMNS);
+  const [searchTerm, setSearchTerm] = useState(''); // Local search state
+  
+  // Load saved column preferences or use defaults
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    const saved = localStorage.getItem('solutions-visible-columns');
+    return saved ? JSON.parse(saved) : DEFAULT_COLUMNS;
+  });
+  
+  // Save column preferences when they change
+  useEffect(() => {
+    localStorage.setItem('solutions-visible-columns', JSON.stringify(visibleColumns));
+  }, [visibleColumns]);
   const {
     scrollRef,
     topScrollRef,
@@ -416,9 +433,8 @@ function SolutionsTable() {
     handleBottomScroll,
     handleMouseDown,
     updateTopScrollWidth
-  } = useTableFeatures(visibleColumns);
+  } = useTableFeatures(visibleColumns, useMemo(() => getInitialColumnWidths('solutions'), []));
   const [apiFilters, setApiFilters] = useState({
-    search: '',
     status: '',
     min_viability: '',
     has_project: '',
@@ -433,7 +449,7 @@ function SolutionsTable() {
     staleTime: 1000 * 60 * 10, // Cache for 10 minutes
   });
 
-  const { data: solutions, isLoading } = useQuery({
+  const { data: allSolutions, isLoading } = useQuery({
     queryKey: ['solutions', apiFilters],
     queryFn: () => getSolutions(apiFilters),
     refetchOnWindowFocus: false,
@@ -441,8 +457,21 @@ function SolutionsTable() {
     keepPreviousData: true,
   });
 
+  // Client-side filtering for search
+  const solutions = useMemo(() => {
+    if (!allSolutions) return [];
+    if (!searchTerm) return allSolutions;
+    
+    const term = searchTerm.toLowerCase();
+    return allSolutions.filter(solution => 
+      solution.title?.toLowerCase().includes(term) ||
+      solution.description?.toLowerCase().includes(term) ||
+      solution.identifier?.toLowerCase().includes(term)
+    );
+  }, [allSolutions, searchTerm]);
+
   const handleSearchChange = useCallback((value) => {
-    setApiFilters(prev => ({...prev, search: value}));
+    setSearchTerm(value);
   }, []);
 
   const handleFilterChange = useCallback((field, value) => {
@@ -458,15 +487,14 @@ function SolutionsTable() {
   }, []);
 
   const handleClearFilters = useCallback(() => {
+    setSearchTerm('');
     setApiFilters({
-      search: '',
       status: '',
       min_viability: '',
       has_project: '',
       sortBy: 'overall_viability',
       sortOrder: 'DESC'
     });
-    window.location.reload();
   }, []);
 
   const handleColumnChange = useCallback((newColumns) => {
@@ -496,6 +524,7 @@ function SolutionsTable() {
     <div>
       {/* Memoized Filters Section */}
       <FiltersSection
+        searchTerm={searchTerm}
         onSearchChange={handleSearchChange}
         apiFilters={apiFilters}
         onFilterChange={handleFilterChange}
@@ -525,123 +554,17 @@ function SolutionsTable() {
           <table className="data-table divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              {visibleColumns.includes('title') && (
-                <th 
-                  onClick={() => handleSort('title')}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                >
-                  <div className="flex items-center">
-                    Title & Feature
-                    <SortIcon field="title" />
-                  </div>
-                </th>
-              )}
-              
-              {visibleColumns.includes('overall_viability') && (
-                <th 
-                  onClick={() => handleSort('overall_viability')}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                >
-                  <div className="flex items-center">
-                    Viability
-                    <SortIcon field="overall_viability" />
-                  </div>
-                </th>
-              )}
-              
-              {visibleColumns.includes('ltv_cac') && (
-                <th 
-                  onClick={() => handleSort('ltv_estimate')}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 resizable-header"
-                  style={{ width: columnWidths.ltv_cac || 'auto' }}
-                >
-                  <div className="flex items-center">
-                    LTV/CAC
-                    <SortIcon field="ltv_estimate" />
-                  </div>
-                  <div 
-                    className="column-resizer"
-                    onMouseDown={(e) => handleMouseDown(e, 'ltv_cac')}
-                  />
-                </th>
-              )}
-              
-              {visibleColumns.includes('revenue') && (
-                <th 
-                  onClick={() => handleSort('recurring_revenue_potential')}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 resizable-header"
-                  style={{ width: columnWidths.revenue || 'auto' }}
-                >
-                  <div className="flex items-center">
-                    Revenue
-                    <SortIcon field="recurring_revenue_potential" />
-                  </div>
-                  <div 
-                    className="column-resizer"
-                    onMouseDown={(e) => handleMouseDown(e, 'revenue')}
-                  />
-                </th>
-              )}
-              
-              {visibleColumns.includes('source_cluster') && (
-                <th 
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider resizable-header"
-                  style={{ width: columnWidths.source_cluster || 'auto' }}
-                >
-                  Source Cluster
-                  <div 
-                    className="column-resizer"
-                    onMouseDown={(e) => handleMouseDown(e, 'source_cluster')}
-                  />
-                </th>
-              )}
-              
-              {visibleColumns.includes('problem_count') && (
-                <th 
-                  onClick={() => handleSort('problem_count')}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 resizable-header"
-                  style={{ width: columnWidths.problem_count || 'auto' }}
-                >
-                  <div className="flex items-center">
-                    Problems
-                    <SortIcon field="problem_count" />
-                  </div>
-                  <div 
-                    className="column-resizer"
-                    onMouseDown={(e) => handleMouseDown(e, 'problem_count')}
-                  />
-                </th>
-              )}
-              
-              {visibleColumns.includes('status') && (
-                <th 
-                  onClick={() => handleSort('status')}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 resizable-header"
-                  style={{ width: columnWidths.status || 'auto' }}
-                >
-                  <div className="flex items-center">
-                    Status
-                    <SortIcon field="status" />
-                  </div>
-                  <div 
-                    className="column-resizer"
-                    onMouseDown={(e) => handleMouseDown(e, 'status')}
-                  />
-                </th>
-              )}
-              
-              {visibleColumns.includes('project') && (
-                <th 
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider resizable-header"
-                  style={{ width: columnWidths.project || 'auto' }}
-                >
-                  Project
-                  <div 
-                    className="column-resizer"
-                    onMouseDown={(e) => handleMouseDown(e, 'project')}
-                  />
-                </th>
-              )}
+              {ALL_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(column => (
+                <TableHeader
+                  key={column.key}
+                  column={column}
+                  sortBy={apiFilters.sortBy}
+                  sortOrder={apiFilters.sortOrder}
+                  onSort={handleSort}
+                  columnWidth={columnWidths[column.key]}
+                  onMouseDown={handleMouseDown}
+                />
+              ))}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">

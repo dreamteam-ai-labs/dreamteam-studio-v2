@@ -1,25 +1,20 @@
-import React, { useState, useCallback, memo } from 'react';
+import React, { useState, useCallback, memo, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getClusters, getProblemsByCluster, getSolutionsByCluster, getClustersFilterOptions } from '../services/api';
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
+import TableHeader from './TableHeader';
 import { useTableFeatures } from '../hooks/useTableFeatures';
+import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
 import '../styles/tables.css';
 
-// Define all available columns
-const ALL_COLUMNS = [
-  { key: 'cluster_label', label: 'Cluster Label', required: true },
-  { key: 'problem_count', label: 'Problems', required: false },
-  { key: 'solution_count', label: 'Solutions', required: false },
-  { key: 'avg_similarity', label: 'Avg Similarity', required: false },
-  { key: 'status', label: 'Status', required: false },
-];
-
-// Default visible columns
-const DEFAULT_COLUMNS = ['cluster_label', 'problem_count', 'solution_count', 'status'];
+// Use centralized column definitions
+const ALL_COLUMNS = TAB_COLUMNS.clusters;
+const DEFAULT_COLUMNS = DEFAULT_VISIBLE_COLUMNS.clusters;
 
 // Memoized filters section
 const FiltersSection = memo(function FiltersSection({ 
+  searchTerm,
   onSearchChange, 
   apiFilters, 
   onFilterChange, 
@@ -44,6 +39,7 @@ const FiltersSection = memo(function FiltersSection({
             Search
           </label>
           <SearchInput 
+            value={searchTerm}
             onSearchChange={onSearchChange}
             placeholder="Search clusters..."
           />
@@ -174,20 +170,17 @@ function ClusterRow({ cluster, visibleColumns }) {
 
   return (
     <>
-      <tr className="hover:bg-gray-50">
-        <td className="px-6 py-4">
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-2 text-left"
-          >
-            <span className="text-gray-400">
+      <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
+        <td className="px-6 py-4" style={{ minWidth: '350px' }}>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400 flex-shrink-0">
               {isExpanded ? '▼' : '▶'}
             </span>
-            <div>
-              <span className="text-sm font-medium text-gray-900">
+            <div className="min-w-0">
+              <span className="text-sm font-medium text-gray-900 block whitespace-normal">
                 {cluster.cluster_label}
               </span>
-              <div className="flex gap-2 mt-1">
+              <div className="flex gap-2 mt-1 flex-wrap">
                 {cluster.problem_count > 0 && (
                   <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
                     📋 {cluster.problem_count} problems
@@ -200,29 +193,29 @@ function ClusterRow({ cluster, visibleColumns }) {
                 )}
               </div>
             </div>
-          </button>
+          </div>
         </td>
         
         {visibleColumns.includes('problem_count') && (
-          <td className="px-6 py-4 text-sm text-gray-900">
+          <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '100px' }}>
             {cluster.problem_count || 0}
           </td>
         )}
         
         {visibleColumns.includes('solution_count') && (
-          <td className="px-6 py-4 text-sm text-gray-900">
+          <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '100px' }}>
             {cluster.solution_count || 0}
           </td>
         )}
         
         {visibleColumns.includes('avg_similarity') && (
-          <td className="px-6 py-4 text-sm text-gray-900">
+          <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '120px' }}>
             {cluster.avg_similarity ? parseFloat(cluster.avg_similarity).toFixed(3) : 'N/A'}
           </td>
         )}
         
         {visibleColumns.includes('status') && (
-          <td className="px-6 py-4">
+          <td className="px-6 py-4" style={{ width: '180px' }}>
             {cluster.solution_count > 0 ? (
               <span className="text-green-600">✓ Has Solutions</span>
             ) : (
@@ -390,7 +383,22 @@ function ClusterRow({ cluster, visibleColumns }) {
 }
 
 function ClustersTable() {
-  const [visibleColumns, setVisibleColumns] = useState(DEFAULT_COLUMNS);
+  const [searchTerm, setSearchTerm] = useState(''); // Local search state
+  
+  // Load saved column preferences or use defaults
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    const saved = localStorage.getItem('clusters-visible-columns');
+    return saved ? JSON.parse(saved) : DEFAULT_COLUMNS;
+  });
+  
+  // Save column preferences when they change
+  useEffect(() => {
+    localStorage.setItem('clusters-visible-columns', JSON.stringify(visibleColumns));
+  }, [visibleColumns]);
+  
+  // Memoize initial widths to prevent infinite loop
+  const initialWidths = useMemo(() => getInitialColumnWidths('clusters'), []);
+  
   const {
     scrollRef,
     topScrollRef,
@@ -401,16 +409,15 @@ function ClustersTable() {
     handleBottomScroll,
     handleMouseDown,
     updateTopScrollWidth
-  } = useTableFeatures(visibleColumns);
+  } = useTableFeatures(visibleColumns, initialWidths);
   const [apiFilters, setApiFilters] = useState({
-    search: '',
     has_solutions: '',
     min_problems: '',
     sortBy: 'problem_count',
     sortOrder: 'DESC'
   });
 
-  const { data: clusters, isLoading } = useQuery({
+  const { data: allClusters, isLoading } = useQuery({
     queryKey: ['clusters', apiFilters],
     queryFn: () => getClusters(apiFilters),
     refetchOnWindowFocus: false,
@@ -418,8 +425,20 @@ function ClustersTable() {
     keepPreviousData: true,
   });
 
+  // Client-side filtering for search
+  const clusters = useMemo(() => {
+    if (!allClusters) return [];
+    if (!searchTerm) return allClusters;
+    
+    const term = searchTerm.toLowerCase();
+    return allClusters.filter(cluster => 
+      cluster.cluster_label?.toLowerCase().includes(term) ||
+      cluster.label?.toLowerCase().includes(term)
+    );
+  }, [allClusters, searchTerm]);
+
   const handleSearchChange = useCallback((value) => {
-    setApiFilters(prev => ({...prev, search: value}));
+    setSearchTerm(value);
   }, []);
 
   const handleFilterChange = useCallback((field, value) => {
@@ -435,14 +454,13 @@ function ClustersTable() {
   }, []);
 
   const handleClearFilters = useCallback(() => {
+    setSearchTerm('');
     setApiFilters({
-      search: '',
       has_solutions: '',
       min_problems: '',
       sortBy: 'problem_count',
       sortOrder: 'DESC'
     });
-    window.location.reload();
   }, []);
 
   const handleColumnChange = useCallback((newColumns) => {
@@ -472,6 +490,7 @@ function ClustersTable() {
     <div>
       {/* Memoized Filters Section */}
       <FiltersSection
+        searchTerm={searchTerm}
         onSearchChange={handleSearchChange}
         apiFilters={apiFilters}
         onFilterChange={handleFilterChange}
@@ -500,84 +519,17 @@ function ClustersTable() {
           <table className="data-table divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th 
-                onClick={() => handleSort('cluster_label')}
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 resizable-header"
-                style={{ width: columnWidths.cluster_label || 'auto' }}
-              >
-                <div className="flex items-center">
-                  Cluster Label
-                  <SortIcon field="cluster_label" />
-                </div>
-                <div 
-                  className="column-resizer"
-                  onMouseDown={(e) => handleMouseDown(e, 'cluster_label')}
+              {ALL_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(column => (
+                <TableHeader
+                  key={column.key}
+                  column={column}
+                  sortBy={apiFilters.sortBy}
+                  sortOrder={apiFilters.sortOrder}
+                  onSort={handleSort}
+                  columnWidth={columnWidths[column.key]}
+                  onMouseDown={handleMouseDown}
                 />
-              </th>
-              
-              {visibleColumns.includes('problem_count') && (
-                <th 
-                  onClick={() => handleSort('problem_count')}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 resizable-header"
-                  style={{ width: columnWidths.problem_count || 'auto' }}
-                >
-                  <div className="flex items-center">
-                    Problems
-                    <SortIcon field="problem_count" />
-                  </div>
-                  <div 
-                    className="column-resizer"
-                    onMouseDown={(e) => handleMouseDown(e, 'problem_count')}
-                  />
-                </th>
-              )}
-              
-              {visibleColumns.includes('solution_count') && (
-                <th 
-                  onClick={() => handleSort('solution_count')}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 resizable-header"
-                  style={{ width: columnWidths.solution_count || 'auto' }}
-                >
-                  <div className="flex items-center">
-                    Solutions
-                    <SortIcon field="solution_count" />
-                  </div>
-                  <div 
-                    className="column-resizer"
-                    onMouseDown={(e) => handleMouseDown(e, 'solution_count')}
-                  />
-                </th>
-              )}
-              
-              {visibleColumns.includes('avg_similarity') && (
-                <th 
-                  onClick={() => handleSort('avg_similarity')}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 resizable-header"
-                  style={{ width: columnWidths.avg_similarity || 'auto' }}
-                >
-                  <div className="flex items-center">
-                    Avg Similarity
-                    <SortIcon field="avg_similarity" />
-                  </div>
-                  <div 
-                    className="column-resizer"
-                    onMouseDown={(e) => handleMouseDown(e, 'avg_similarity')}
-                  />
-                </th>
-              )}
-              
-              {visibleColumns.includes('status') && (
-                <th 
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider resizable-header"
-                  style={{ width: columnWidths.status || 'auto' }}
-                >
-                  Status
-                  <div 
-                    className="column-resizer"
-                    onMouseDown={(e) => handleMouseDown(e, 'status')}
-                  />
-                </th>
-              )}
+              ))}
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">

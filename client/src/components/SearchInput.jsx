@@ -1,34 +1,45 @@
-import { useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
-// Completely isolated search input component
-function SearchInput({ onSearchChange, placeholder = "Search..." }) {
-  const inputRef = useRef(null);
-  const timerRef = useRef(null);
+// Controlled search input component with debouncing
+function SearchInput({ value = '', onSearchChange, placeholder = "Search..." }) {
+  const [localValue, setLocalValue] = useState(value);
+  const [timer, setTimer] = useState(null);
+
+  // Update local value when prop changes
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
 
   useEffect(() => {
     // Cleanup timer on unmount
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
+      if (timer) {
+        clearTimeout(timer);
       }
     };
-  }, []);
+  }, [timer]);
 
-  const handleChange = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
+  const handleChange = (e) => {
+    const newValue = e.target.value;
+    setLocalValue(newValue);
+    
+    // Clear existing timer
+    if (timer) {
+      clearTimeout(timer);
     }
     
-    timerRef.current = setTimeout(() => {
-      const value = inputRef.current?.value || '';
-      onSearchChange(value);
-    }, 500);
+    // Set new timer for debounced callback
+    const newTimer = setTimeout(() => {
+      onSearchChange(newValue);
+    }, 300);
+    
+    setTimer(newTimer);
   };
 
   return (
     <input
-      ref={inputRef}
       type="text"
+      value={localValue}
       onChange={handleChange}
       placeholder={placeholder}
       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"

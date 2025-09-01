@@ -3,33 +3,39 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 /**
  * Custom hook for table features including column resizing and dual scrollbars
  */
-export function useTableFeatures(visibleColumns) {
+export function useTableFeatures(visibleColumns, initialWidths = {}) {
   const scrollRef = useRef(null);
   const topScrollRef = useRef(null);
   const [scrollIndicators, setScrollIndicators] = useState({ left: false, right: false });
-  const [columnWidths, setColumnWidths] = useState({});
+  const [columnWidths, setColumnWidths] = useState(() => {
+    // Initialize with the provided initial widths immediately
+    return { ...initialWidths };
+  });
   const [isResizing, setIsResizing] = useState(false);
   const resizingColumn = useRef(null);
   const startX = useRef(0);
   const startWidth = useRef(0);
+  
+  
+  // Store user-resized columns to preserve them
+  const userResizedColumns = useRef(new Set());
 
-  // Calculate equal column widths based on container width
-  const calculateEqualWidths = useCallback(() => {
-    if (scrollRef.current && visibleColumns.length > 0) {
-      const container = scrollRef.current;
-      const containerWidth = container.clientWidth;
-      // Reserve some width for padding and borders (approximately 20px per column)
-      const availableWidth = containerWidth - (visibleColumns.length * 20);
-      const columnWidth = Math.max(150, Math.floor(availableWidth / visibleColumns.length));
+  // Initialize column widths only for new columns (preserve user resizes)
+  const initializeColumnWidths = useCallback(() => {
+    setColumnWidths(prev => {
+      const newWidths = { ...prev };
       
-      const newWidths = {};
+      // Only set width for columns that haven't been user-resized and don't have a width
       visibleColumns.forEach(col => {
-        newWidths[col] = columnWidth;
+        if (!userResizedColumns.current.has(col) && !newWidths[col]) {
+          // Use initial width from config if provided
+          newWidths[col] = initialWidths[col] || 150;
+        }
       });
       
-      setColumnWidths(newWidths);
-    }
-  }, [visibleColumns]);
+      return newWidths;
+    });
+  }, [visibleColumns, initialWidths]);
 
   // Check scroll position for indicators
   const checkScroll = useCallback(() => {
@@ -70,7 +76,7 @@ export function useTableFeatures(visibleColumns) {
     }
   }, []);
 
-  // Column resize handlers with throttling
+  // Column resize handlers
   const handleMouseDown = useCallback((e, columnKey) => {
     e.preventDefault();
     e.stopPropagation();
@@ -80,7 +86,12 @@ export function useTableFeatures(visibleColumns) {
     
     resizingColumn.current = columnKey;
     startX.current = e.pageX;
-    startWidth.current = columnWidths[columnKey] || th.offsetWidth;
+    // Use the actual width from the element if columnWidths doesn't have it yet
+    // Parse the width from style or use offsetWidth
+    const currentWidth = columnWidths[columnKey] || 
+                        parseInt(th.style.width) || 
+                        th.offsetWidth;
+    startWidth.current = currentWidth;
     setIsResizing(true);
     
     // Add resizing class to body to prevent text selection
@@ -91,23 +102,20 @@ export function useTableFeatures(visibleColumns) {
   const handleMouseMove = useCallback((e) => {
     if (!resizingColumn.current) return;
     
-    // Direct update without animation frame for immediate feedback
-    // but throttled to prevent excessive re-renders
     const diff = e.pageX - startX.current;
-    const newWidth = Math.max(100, startWidth.current + diff);
+    const newWidth = Math.max(80, startWidth.current + diff);
     
-    // Only update if width changed by at least 5 pixels
-    const currentWidth = columnWidths[resizingColumn.current] || startWidth.current;
-    if (Math.abs(newWidth - currentWidth) >= 5) {
-      setColumnWidths(prev => ({
-        ...prev,
-        [resizingColumn.current]: newWidth
-      }));
-    }
-  }, [columnWidths]);
+    setColumnWidths(prev => ({
+      ...prev,
+      [resizingColumn.current]: newWidth
+    }));
+  }, []);
 
   const handleMouseUp = useCallback(() => {
     if (resizingColumn.current) {
+      // Mark this column as user-resized
+      userResizedColumns.current.add(resizingColumn.current);
+      
       resizingColumn.current = null;
       setIsResizing(false);
       document.body.style.cursor = '';
@@ -131,10 +139,17 @@ export function useTableFeatures(visibleColumns) {
     }
   }, [isResizing, handleMouseMove, handleMouseUp]);
 
-  // Calculate equal widths when columns change
+  // Initialize column widths when columns change
   useEffect(() => {
-    calculateEqualWidths();
-  }, [calculateEqualWidths]);
+    // Only initialize if we don't have widths yet
+    setColumnWidths(prev => {
+      const hasWidths = Object.keys(prev).length > 0;
+      if (!hasWidths && Object.keys(initialWidths).length > 0) {
+        return { ...initialWidths };
+      }
+      return prev;
+    });
+  }, [initialWidths]);
 
   // Update scroll indicators and top scroll width on mount and when columns change
   useEffect(() => {
@@ -142,7 +157,6 @@ export function useTableFeatures(visibleColumns) {
     updateTopScrollWidth();
     
     const handleResize = () => {
-      calculateEqualWidths();
       checkScroll();
       updateTopScrollWidth();
     };
@@ -152,7 +166,7 @@ export function useTableFeatures(visibleColumns) {
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [checkScroll, updateTopScrollWidth, calculateEqualWidths, visibleColumns]);
+  }, [checkScroll, updateTopScrollWidth, visibleColumns]);
 
   return {
     scrollRef,

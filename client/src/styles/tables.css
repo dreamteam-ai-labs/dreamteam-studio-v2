@@ -103,7 +103,7 @@
 /* Ensure table has minimum width for proper scrolling */
 .data-table {
   min-width: 100%;
-  table-layout: fixed; /* Use fixed layout for better column width control */
+  table-layout: fixed; /* Use fixed layout for proper column resizing */
 }
 
 /* Make column headers sticky when scrolling horizontally */

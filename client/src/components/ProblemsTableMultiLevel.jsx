@@ -1,21 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getProblems, getProblemsFilterOptions, getSolutionsByCluster, getSolutionsByProblem } from '../services/api';
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
+import TableHeader from './TableHeader';
+import { useTableFeatures } from '../hooks/useTableFeatures';
+import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
+import '../styles/tables.css';
 
-// Define all available columns
-const ALL_COLUMNS = [
-  { key: 'title', label: 'Title', required: true },
-  { key: 'description', label: 'Description', required: false },
-  { key: 'cluster_label', label: 'Cluster', required: false },
-  { key: 'impact', label: 'Impact', required: false },
-  { key: 'solution_count', label: 'Solutions', required: false },
-  { key: 'created_at', label: 'Created', required: false },
-];
-
-// Default visible columns
-const DEFAULT_COLUMNS = ['title', 'cluster_label', 'impact', 'solution_count'];
+// Use centralized column definitions
+const ALL_COLUMNS = TAB_COLUMNS.problems;
+const DEFAULT_COLUMNS = DEFAULT_VISIBLE_COLUMNS.problems;
 
 // Items per page for pagination
 const ITEMS_PER_PAGE = 20;
@@ -125,24 +120,61 @@ function ProblemSolutions({ problemId, clusterId, clusterLabel }) {
 }
 
 function ProblemsTableMultiLevel() {
-  const [visibleColumns, setVisibleColumns] = useState(DEFAULT_COLUMNS);
+  // Load saved column preferences or use defaults
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    const saved = localStorage.getItem('problems-visible-columns');
+    return saved ? JSON.parse(saved) : DEFAULT_COLUMNS;
+  });
   const [expandedProblems, setExpandedProblems] = useState(new Set());
   const [expandedClusters, setExpandedClusters] = useState(new Set());
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState(''); // Local search state
+  
+  // Save column preferences when they change
+  useEffect(() => {
+    localStorage.setItem('problems-visible-columns', JSON.stringify(visibleColumns));
+  }, [visibleColumns]);
+
+  // Add table features hook for column resizing with initial widths
+  const {
+    scrollRef,
+    topScrollRef,
+    scrollIndicators,
+    columnWidths,
+    isResizing,
+    handleTopScroll,
+    handleBottomScroll,
+    handleMouseDown,
+    updateTopScrollWidth
+  } = useTableFeatures(visibleColumns, useMemo(() => getInitialColumnWidths('problems'), []));
+  
   const [apiFilters, setApiFilters] = useState({
-    search: '',
     impact: '',
     cluster_label: '',
     sortBy: 'created_at',
     sortOrder: 'DESC'
   });
 
-  // Fetch problems
-  const { data: problems, isLoading } = useQuery({
+  // Fetch ALL problems (without search filter)
+  const { data: allProblems, isLoading } = useQuery({
     queryKey: ['problems', apiFilters],
     queryFn: () => getProblems(apiFilters),
     refetchOnWindowFocus: false,
   });
+
+  // Client-side filtering for search
+  const problems = useMemo(() => {
+    if (!allProblems) return [];
+    if (!searchTerm) return allProblems;
+    
+    const term = searchTerm.toLowerCase();
+    return allProblems.filter(problem => 
+      problem.title?.toLowerCase().includes(term) ||
+      problem.description?.toLowerCase().includes(term) ||
+      problem.cluster_label?.toLowerCase().includes(term) ||
+      problem.identifier?.toLowerCase().includes(term)
+    );
+  }, [allProblems, searchTerm]);
 
   // Fetch filter options
   const { data: filterOptions } = useQuery({
@@ -173,6 +205,16 @@ function ProblemsTableMultiLevel() {
     }));
     setCurrentPage(1);
   };
+
+  const handleColumnChange = useCallback((newColumns) => {
+    // Ensure title column is always visible
+    if (!newColumns.includes('title')) {
+      newColumns = ['title', ...newColumns];
+    }
+    setVisibleColumns(newColumns);
+    // Update top scroll width after columns change
+    setTimeout(updateTopScrollWidth, 0);
+  }, [updateTopScrollWidth]);
 
   const toggleProblem = (problemId) => {
     setExpandedProblems(prev => {
@@ -221,92 +263,89 @@ function ProblemsTableMultiLevel() {
           <ColumnSelector 
             columns={ALL_COLUMNS}
             selectedColumns={visibleColumns}
-            onColumnChange={setVisibleColumns}
+            onColumnChange={handleColumnChange}
           />
         </div>
         
-        <div className="flex gap-4">
-          <SearchInput 
-            onSearchChange={(value) => updateFilter('search', value)}
-            placeholder="Search..."
-          />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Search
+            </label>
+            <SearchInput 
+              onSearchChange={(value) => setSearchTerm(value)}
+              placeholder="Search problems..."
+              value={searchTerm}
+            />
+          </div>
           
-          <select
-            value={apiFilters.impact}
-            onChange={(e) => updateFilter('impact', e.target.value)}
-            className="px-3 py-2 border rounded"
-          >
-            <option value="">All Impact</option>
-            {filterOptions?.impacts?.map(i => (
-              <option key={i} value={i}>{i}</option>
-            ))}
-          </select>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Impact Level
+            </label>
+            <select
+              value={apiFilters.impact}
+              onChange={(e) => updateFilter('impact', e.target.value)}
+              className="w-full px-3 py-2 border rounded"
+            >
+              <option value="">All Impact Levels</option>
+              {filterOptions?.impacts?.map(i => (
+                <option key={i} value={i}>{i}</option>
+              ))}
+            </select>
+          </div>
 
-          <select
-            value={apiFilters.cluster_label}
-            onChange={(e) => updateFilter('cluster_label', e.target.value)}
-            className="px-3 py-2 border rounded"
-          >
-            <option value="">All Clusters</option>
-            {filterOptions?.cluster_labels?.map(label => (
-              <option key={label} value={label}>{label}</option>
-            ))}
-          </select>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Cluster
+            </label>
+            <select
+              value={apiFilters.cluster_label}
+              onChange={(e) => updateFilter('cluster_label', e.target.value)}
+              className="w-full px-3 py-2 border rounded"
+            >
+              <option value="">All Clusters</option>
+              {filterOptions?.cluster_labels?.map(label => (
+                <option key={label} value={label}>{label}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              {visibleColumns.includes('title') && (
-                <th 
-                  onClick={() => handleSort('title')}
-                  className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
-                >
-                  Title {apiFilters.sortBy === 'title' && (apiFilters.sortOrder === 'DESC' ? '↓' : '↑')}
-                </th>
-              )}
-              {visibleColumns.includes('description') && (
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                  Description
-                </th>
-              )}
-              {visibleColumns.includes('cluster_label') && (
-                <th 
-                  onClick={() => handleSort('cluster_label')}
-                  className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
-                >
-                  Cluster {apiFilters.sortBy === 'cluster_label' && (apiFilters.sortOrder === 'DESC' ? '↓' : '↑')}
-                </th>
-              )}
-              {visibleColumns.includes('impact') && (
-                <th 
-                  onClick={() => handleSort('impact')}
-                  className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
-                >
-                  Impact {apiFilters.sortBy === 'impact' && (apiFilters.sortOrder === 'DESC' ? '↓' : '↑')}
-                </th>
-              )}
-              {visibleColumns.includes('solution_count') && (
-                <th 
-                  onClick={() => handleSort('solution_count')}
-                  className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
-                >
-                  Solutions {apiFilters.sortBy === 'solution_count' && (apiFilters.sortOrder === 'DESC' ? '↓' : '↑')}
-                </th>
-              )}
-              {visibleColumns.includes('created_at') && (
-                <th 
-                  onClick={() => handleSort('created_at')}
-                  className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
-                >
-                  Created {apiFilters.sortBy === 'created_at' && (apiFilters.sortOrder === 'DESC' ? '↓' : '↑')}
-                </th>
-              )}
-            </tr>
-          </thead>
+      <div className={`bg-white rounded-lg shadow table-container ${isResizing ? 'resizing' : ''}`}>
+        {/* Top scrollbar */}
+        <div 
+          ref={topScrollRef}
+          className="table-scroll-top"
+          onScroll={handleTopScroll}
+        >
+          <div className="table-scroll-top-inner" />
+        </div>
+        
+        {/* Main table container */}
+        <div 
+          ref={scrollRef}
+          className={`table-scroll table-scroll-indicator ${scrollIndicators.left ? 'can-scroll-left' : ''} ${scrollIndicators.right ? 'can-scroll-right' : ''}`}
+          onScroll={handleBottomScroll}
+        >
+          <table className="data-table divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                {ALL_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(column => (
+                  <TableHeader
+                    key={column.key}
+                    column={column}
+                    sortBy={apiFilters.sortBy}
+                    sortOrder={apiFilters.sortOrder}
+                    onSort={handleSort}
+                    columnWidth={columnWidths[column.key]}
+                    onMouseDown={handleMouseDown}
+                  />
+                ))}
+              </tr>
+            </thead>
           <tbody className="divide-y divide-gray-200">
             {currentProblems.map((problem) => {
               const isProblemExpanded = expandedProblems.has(problem.id);
@@ -372,9 +411,24 @@ function ProblemsTableMultiLevel() {
                         </span>
                       </td>
                     )}
+                    {visibleColumns.includes('industry') && (
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {problem.industry || '-'}
+                      </td>
+                    )}
+                    {visibleColumns.includes('business_size') && (
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {problem.business_size || '-'}
+                      </td>
+                    )}
                     {visibleColumns.includes('solution_count') && (
                       <td className="px-4 py-3 text-sm">
                         {problem.solution_count || 0}
+                      </td>
+                    )}
+                    {visibleColumns.includes('project_count') && (
+                      <td className="px-4 py-3 text-sm">
+                        {problem.project_count || 0}
                       </td>
                     )}
                     {visibleColumns.includes('created_at') && (
@@ -453,11 +507,14 @@ function ProblemsTableMultiLevel() {
               );
             })}
           </tbody>
-        </table>
+          </table>
+        </div>
+      </div>
         
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="bg-gray-50 px-4 py-3 flex items-center justify-between border-t">
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="bg-white rounded-lg shadow mt-4">
+          <div className="px-4 py-3 flex items-center justify-between border-t">
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
@@ -484,8 +541,8 @@ function ProblemsTableMultiLevel() {
               Showing {startIndex + 1}-{Math.min(endIndex, totalItems)} of {totalItems}
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
