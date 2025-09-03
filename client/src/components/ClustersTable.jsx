@@ -1,6 +1,7 @@
 import React, { useState, useCallback, memo, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getClusters, getProblemsByCluster, getSolutionsByCluster, getClustersFilterOptions } from '../services/api';
+import api from '../services/api';
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
@@ -20,17 +21,12 @@ const FiltersSection = memo(function FiltersSection({
   onFilterChange, 
   onClearFilters,
   visibleColumns,
-  onColumnChange
+  entityType = 'problem'
 }) {
   return (
     <div className="bg-white p-4 rounded-lg shadow mb-4">
       <div className="flex justify-between items-start mb-4">
         <h2 className="text-lg font-semibold text-gray-800">Filters</h2>
-        <ColumnSelector 
-          columns={ALL_COLUMNS}
-          selectedColumns={visibleColumns}
-          onColumnChange={onColumnChange}
-        />
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
@@ -62,7 +58,7 @@ const FiltersSection = memo(function FiltersSection({
           </div>
         )}
 
-        {visibleColumns.includes('problem_count') && (
+        {visibleColumns.includes('problem_count') && entityType === 'problem' && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Min Problems
@@ -92,7 +88,7 @@ const FiltersSection = memo(function FiltersSection({
 });
 
 // Cluster row component for expandable functionality
-function ClusterRow({ cluster, visibleColumns }) {
+function ClusterRow({ cluster, visibleColumns, entityType = 'problem' }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [problemSort, setProblemSort] = useState({ field: 'impact', order: 'desc' });
   const [solutionSort, setSolutionSort] = useState({ field: 'viability', order: 'desc' });
@@ -100,13 +96,20 @@ function ClusterRow({ cluster, visibleColumns }) {
   const { data: problems, isLoading: problemsLoading } = useQuery({
     queryKey: ['cluster-problems', cluster.cluster_id],
     queryFn: () => getProblemsByCluster(cluster.cluster_id),
-    enabled: isExpanded,
+    enabled: isExpanded && entityType === 'problem',
     staleTime: 1000 * 60 * 5,
   });
 
   const { data: solutions, isLoading: solutionsLoading } = useQuery({
-    queryKey: ['cluster-solutions', cluster.cluster_id],
-    queryFn: () => getSolutionsByCluster(cluster.cluster_id),
+    queryKey: ['cluster-solutions', cluster.cluster_id, entityType],
+    queryFn: () => {
+      // For solution clusters, fetch solutions directly from that cluster
+      if (entityType === 'solution') {
+        return api.get(`/solution-clusters/${cluster.cluster_id}/solutions`);
+      }
+      // For problem clusters, fetch solutions generated from that cluster
+      return getSolutionsByCluster(cluster.cluster_id);
+    },
     enabled: isExpanded,
     staleTime: 1000 * 60 * 5,
   });
@@ -181,7 +184,7 @@ function ClusterRow({ cluster, visibleColumns }) {
                 {cluster.cluster_label}
               </span>
               <div className="flex gap-2 mt-1 flex-wrap">
-                {cluster.problem_count > 0 && (
+                {entityType === 'problem' && cluster.problem_count > 0 && (
                   <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
                     📋 {cluster.problem_count} problems
                   </span>
@@ -196,7 +199,7 @@ function ClusterRow({ cluster, visibleColumns }) {
           </div>
         </td>
         
-        {visibleColumns.includes('problem_count') && (
+        {visibleColumns.includes('problem_count') && entityType === 'problem' && (
           <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '100px' }}>
             {cluster.problem_count || 0}
           </td>
@@ -214,7 +217,7 @@ function ClusterRow({ cluster, visibleColumns }) {
           </td>
         )}
         
-        {visibleColumns.includes('status') && (
+        {visibleColumns.includes('status') && entityType === 'problem' && (
           <td className="px-6 py-4" style={{ width: '180px' }}>
             {cluster.solution_count > 0 ? (
               <span className="text-green-600">✓ Has Solutions</span>
@@ -233,7 +236,8 @@ function ClusterRow({ cluster, visibleColumns }) {
           <td colSpan={visibleColumns.length + 1} className="px-6 py-0">
             <div className="bg-gradient-to-r from-purple-50 to-indigo-50 p-4 mb-4 rounded">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Problems Section */}
+                {/* Problems Section - Only show for problem clusters */}
+                {entityType === 'problem' && (
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-sm font-semibold text-gray-700 flex items-center gap-2">
@@ -290,9 +294,10 @@ function ClusterRow({ cluster, visibleColumns }) {
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* Solutions Section */}
-                <div>
+                <div className={entityType === 'solution' ? 'col-span-2' : ''}>
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                       💡 Solutions ({solutions?.length || 0})
@@ -382,19 +387,46 @@ function ClusterRow({ cluster, visibleColumns }) {
   );
 }
 
-function ClustersTable() {
-  const [searchTerm, setSearchTerm] = useState(''); // Local search state
+function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFiltered, entityType = 'problem' }) {
+  // Use external filters if provided, otherwise use local state
+  const [localSearchTerm, setLocalSearchTerm] = useState(''); // Local search state
+  const searchTerm = externalFilters?.searchTerm ?? localSearchTerm;
   
-  // Load saved column preferences or use defaults
+  // Load saved column preferences or use defaults - separate for each entity type
   const [visibleColumns, setVisibleColumns] = useState(() => {
-    const saved = localStorage.getItem('clusters-visible-columns');
-    return saved ? JSON.parse(saved) : DEFAULT_COLUMNS;
+    const storageKey = entityType === 'solution' ? 'solution-clusters-visible-columns' : 'clusters-visible-columns';
+    const saved = localStorage.getItem(storageKey);
+    // For solution clusters, exclude status AND problem_count
+    // For problem clusters, use all default columns including problem_count
+    let defaultCols;
+    if (entityType === 'solution') {
+      // Remove status and problem_count for solution clusters
+      defaultCols = DEFAULT_COLUMNS.filter(col => col !== 'status' && col !== 'problem_count');
+    } else {
+      // Problem clusters get all columns from DEFAULT_COLUMNS
+      defaultCols = [...DEFAULT_COLUMNS];
+    }
+    // If there's saved data but it doesn't include critical columns, reset it
+    if (saved) {
+      const savedCols = JSON.parse(saved);
+      // For problem clusters, ensure problem_count is visible
+      if (entityType === 'problem' && !savedCols.includes('problem_count')) {
+        return defaultCols;
+      }
+      // For solution clusters, remove problem_count if it's there
+      if (entityType === 'solution') {
+        return savedCols.filter(col => col !== 'problem_count');
+      }
+      return savedCols;
+    }
+    return defaultCols;
   });
   
   // Save column preferences when they change
   useEffect(() => {
-    localStorage.setItem('clusters-visible-columns', JSON.stringify(visibleColumns));
-  }, [visibleColumns]);
+    const storageKey = entityType === 'solution' ? 'solution-clusters-visible-columns' : 'clusters-visible-columns';
+    localStorage.setItem(storageKey, JSON.stringify(visibleColumns));
+  }, [visibleColumns, entityType]);
   
   // Memoize initial widths to prevent infinite loop
   const initialWidths = useMemo(() => getInitialColumnWidths('clusters'), []);
@@ -418,28 +450,87 @@ function ClustersTable() {
   });
 
   const { data: allClusters, isLoading } = useQuery({
-    queryKey: ['clusters', apiFilters],
-    queryFn: () => getClusters(apiFilters),
+    queryKey: [entityType === 'solution' ? 'solution-clusters' : 'clusters', apiFilters],
+    queryFn: () => getClusters(apiFilters, entityType),
     refetchOnWindowFocus: false,
     refetchOnMount: false,
     keepPreviousData: true,
   });
 
-  // Client-side filtering for search
+  // Client-side filtering for search and external filters
   const clusters = useMemo(() => {
     if (!allClusters) return [];
-    if (!searchTerm) return allClusters;
     
-    const term = searchTerm.toLowerCase();
-    return allClusters.filter(cluster => 
-      cluster.cluster_label?.toLowerCase().includes(term) ||
-      cluster.label?.toLowerCase().includes(term)
-    );
-  }, [allClusters, searchTerm]);
+    let filtered = allClusters;
+    
+    // Apply search term
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(cluster => 
+        cluster.cluster_label?.toLowerCase().includes(term) ||
+        cluster.label?.toLowerCase().includes(term)
+      );
+    }
+    
+    // Apply external filters if provided
+    if (externalFilters) {
+      // Cluster label filter
+      if (externalFilters.cluster_label) {
+        const labelTerm = externalFilters.cluster_label.toLowerCase();
+        filtered = filtered.filter(cluster => 
+          cluster.cluster_label?.toLowerCase().includes(labelTerm) ||
+          cluster.label?.toLowerCase().includes(labelTerm)
+        );
+      }
+      
+      // Problem count filter (minimum)
+      if (externalFilters.problem_count !== null && externalFilters.problem_count !== undefined) {
+        filtered = filtered.filter(cluster => 
+          (cluster.problem_count || 0) >= externalFilters.problem_count
+        );
+      }
+      
+      // Solution count filter (minimum)
+      if (externalFilters.solution_count !== null && externalFilters.solution_count !== undefined) {
+        filtered = filtered.filter(cluster => 
+          (cluster.solution_count || 0) >= externalFilters.solution_count
+        );
+      }
+      
+      // Avg similarity filter (minimum)
+      if (externalFilters.avg_similarity !== null && externalFilters.avg_similarity !== undefined) {
+        filtered = filtered.filter(cluster => 
+          (parseFloat(cluster.avg_similarity) || 0) >= externalFilters.avg_similarity
+        );
+      }
+      
+      // Status filter (multiple selection)
+      if (externalFilters.status?.length > 0) {
+        filtered = filtered.filter(cluster => {
+          // Determine cluster status based on solution count
+          const status = cluster.solution_count > 0 ? 'has-solutions' : 'no-solutions';
+          return externalFilters.status.includes(status);
+        });
+      }
+    }
+    
+    return filtered;
+  }, [allClusters, searchTerm, externalFilters]);
+
+  // Pass filtered data back to parent
+  useEffect(() => {
+    if (onDataFiltered) {
+      onDataFiltered(clusters);
+    }
+  }, [clusters, onDataFiltered]);
 
   const handleSearchChange = useCallback((value) => {
-    setSearchTerm(value);
-  }, []);
+    if (externalFilters) {
+      onFiltersChange?.(prev => ({ ...prev, searchTerm: value }));
+    } else {
+      setLocalSearchTerm(value);
+    }
+  }, [externalFilters, onFiltersChange]);
 
   const handleFilterChange = useCallback((field, value) => {
     setApiFilters(prev => ({...prev, [field]: value}));
@@ -488,19 +579,36 @@ function ClustersTable() {
 
   return (
     <div>
-      {/* Memoized Filters Section */}
-      <FiltersSection
-        searchTerm={searchTerm}
-        onSearchChange={handleSearchChange}
-        apiFilters={apiFilters}
-        onFilterChange={handleFilterChange}
-        onClearFilters={handleClearFilters}
-        visibleColumns={visibleColumns}
-        onColumnChange={handleColumnChange}
-      />
+      {/* Only show local filters if no external filters provided */}
+      {!externalFilters && (
+        <FiltersSection
+          searchTerm={searchTerm}
+          onSearchChange={handleSearchChange}
+          apiFilters={apiFilters}
+          onFilterChange={handleFilterChange}
+          onClearFilters={handleClearFilters}
+          visibleColumns={visibleColumns}
+          entityType={entityType}
+        />
+      )}
 
       {/* Table */}
       <div className={`bg-white rounded-lg shadow table-container ${isResizing ? 'resizing' : ''}`}>
+        {/* Table Header */}
+        <div className="p-4 border-b border-gray-200">
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-gray-800">
+              {entityType === 'solution' ? 'Solution' : 'Problem'} Clusters ({clusters?.length || 0} total)
+            </h2>
+            <ColumnSelector 
+              columns={entityType === 'solution' 
+                ? ALL_COLUMNS.filter(col => col.key !== 'status' && col.key !== 'problem_count')
+                : ALL_COLUMNS}
+              selectedColumns={visibleColumns}
+              onColumnChange={handleColumnChange}
+            />
+          </div>
+        </div>
         {/* Top scrollbar */}
         <div 
           ref={topScrollRef}
@@ -519,7 +627,12 @@ function ClustersTable() {
           <table className="data-table divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              {ALL_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(column => (
+              {ALL_COLUMNS.filter(col => {
+                // Hide status and problem_count columns for solution clusters
+                if (entityType === 'solution' && (col.key === 'status' || col.key === 'problem_count')) return false;
+                // Show column if it's in visibleColumns
+                return visibleColumns.includes(col.key);
+              }).map(column => (
                 <TableHeader
                   key={column.key}
                   column={column}
@@ -545,6 +658,7 @@ function ClustersTable() {
                   key={cluster.cluster_id} 
                   cluster={cluster} 
                   visibleColumns={visibleColumns}
+                  entityType={entityType}
                 />
               ))
             )}

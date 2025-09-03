@@ -84,8 +84,48 @@ router.get('/clusters/filter-options', async (req, res) => {
 
 router.get('/clusters/:id/problems', async (req, res) => {
   try {
+    console.log(`Fetching problems for cluster ID: ${req.params.id}`);
+    
+    // First check if the cluster exists
+    const clusterCheck = await databaseService.checkClusterExists(req.params.id);
+    
+    if (!clusterCheck.exists) {
+      console.log(`Cluster ${req.params.id} not found in database`);
+      // Return empty array instead of error for missing clusters
+      return res.json([]);
+    }
+    
     const problems = await databaseService.getProblemsByClusterId(req.params.id);
+    console.log(`Found ${problems.length} problems for cluster ${req.params.id}`);
     res.json(problems);
+  } catch (error) {
+    console.error(`Error fetching problems for cluster ${req.params.id}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === SOLUTION CLUSTERS ===
+router.get('/solution-clusters', async (req, res) => {
+  try {
+    const filters = {
+      version: req.query.version,
+      has_solutions: req.query.has_solutions,
+      min_solutions: req.query.min_solutions,
+      search: req.query.search,
+      sortBy: req.query.sortBy,
+      sortOrder: req.query.sortOrder
+    };
+    const clusters = await databaseService.getSolutionClusters(filters);
+    res.json(clusters);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/solution-clusters/:id/solutions', async (req, res) => {
+  try {
+    const solutions = await databaseService.getSolutionsByClusterId(req.params.id);
+    res.json(solutions);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -123,6 +163,25 @@ router.get('/solutions/:id/problems', async (req, res) => {
   try {
     const problems = await databaseService.getProblemsBySolutionId(req.params.id);
     res.json(problems);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === DEBUG ===
+router.get('/debug/orphaned-clusters', async (req, res) => {
+  try {
+    const result = await databaseService.getOrphanedClusterReferences();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/debug/cluster/:id', async (req, res) => {
+  try {
+    const result = await databaseService.debugCluster(req.params.id);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

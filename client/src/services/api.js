@@ -37,7 +37,10 @@ export const getProblemById = (id) => api.get(`/problems/${id}`);
 export const getProblemsFilterOptions = () => api.get('/problems/filter-options');
 
 // Clusters
-export const getClusters = (filters = {}) => api.get('/clusters', { params: filters });
+export const getClusters = (filters = {}, entityType = 'problem') => {
+  const endpoint = entityType === 'solution' ? '/solution-clusters' : '/clusters';
+  return api.get(endpoint, { params: filters });
+};
 export const getProblemsByCluster = (clusterId) => api.get(`/clusters/${clusterId}/problems`);
 export const getClustersFilterOptions = () => api.get('/clusters/filter-options');
 

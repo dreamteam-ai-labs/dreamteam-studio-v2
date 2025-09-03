@@ -119,6 +119,23 @@ class DatabaseService {
     return result.rows;
   }
 
+  async checkClusterExists(clusterId) {
+    try {
+      const query = `
+        SELECT EXISTS(
+          SELECT 1 
+          FROM dreamteam.cluster_centroids 
+          WHERE cluster_id = $1
+        ) as exists
+      `;
+      const result = await pool.query(query, [clusterId]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error checking cluster existence:', error);
+      return { exists: false };
+    }
+  }
+
   async getProblemsByClusterId(clusterId) {
     try {
       const query = `
@@ -298,6 +315,8 @@ class DatabaseService {
           s.recurring_revenue_potential,
           s.source_cluster_id,
           s.source_cluster_label,
+          s.solution_cluster_id,
+          s.solution_cluster_label,
           s.linear_project_id,
           s.github_repo_url,
           s.created_at,
@@ -386,6 +405,114 @@ class DatabaseService {
       return result.rows[0];
     } catch (error) {
       console.error('Error fetching pipeline stats:', error);
+      throw error;
+    }
+  }
+
+  // === DEBUG ===
+  async debugCluster(clusterId) {
+    try {
+      // Get cluster info
+      const clusterQuery = `
+        SELECT * FROM dreamteam.cluster_centroids 
+        WHERE cluster_id = $1
+      `;
+      const clusterResult = await pool.query(clusterQuery, [clusterId]);
+      
+      // Count problems with this cluster_id
+      const problemCountQuery = `
+        SELECT COUNT(*) as count 
+        FROM dreamteam.problems 
+        WHERE cluster_id = $1
+      `;
+      const problemCountResult = await pool.query(problemCountQuery, [clusterId]);
+      
+      // Get sample problems if any
+      const problemSampleQuery = `
+        SELECT id, title, cluster_id, cluster_label 
+        FROM dreamteam.problems 
+        WHERE cluster_id = $1 
+        LIMIT 5
+      `;
+      const problemSampleResult = await pool.query(problemSampleQuery, [clusterId]);
+      
+      // Check if it appears in the clusters list
+      const visibilityQuery = `
+        WITH active_version AS (
+          SELECT COALESCE(
+            (SELECT version FROM dreamteam.cluster_versions WHERE is_active = true),
+            (SELECT MAX(version) FROM dreamteam.cluster_centroids)
+          ) as version
+        )
+        SELECT 
+          c.cluster_id,
+          c.cluster_label,
+          c.version,
+          c.is_outlier_bucket,
+          COUNT(p.id) as problem_count
+        FROM dreamteam.cluster_centroids c
+        LEFT JOIN dreamteam.problems p ON p.cluster_id = c.cluster_id
+        WHERE c.cluster_id = $1
+        GROUP BY c.cluster_id, c.cluster_label, c.version, c.is_outlier_bucket
+      `;
+      const visibilityResult = await pool.query(visibilityQuery, [clusterId]);
+      
+      return {
+        cluster: clusterResult.rows[0] || null,
+        problem_count: parseInt(problemCountResult.rows[0].count),
+        sample_problems: problemSampleResult.rows,
+        visibility_info: visibilityResult.rows[0] || null,
+        diagnosis: {
+          cluster_exists: clusterResult.rows.length > 0,
+          has_problems: parseInt(problemCountResult.rows[0].count) > 0,
+          is_outlier: clusterResult.rows[0]?.is_outlier_bucket || false,
+          appears_in_list: visibilityResult.rows.length > 0 && parseInt(visibilityResult.rows[0]?.problem_count || 0) > 0
+        }
+      };
+    } catch (error) {
+      console.error('Error debugging cluster:', error);
+      throw error;
+    }
+  }
+  
+  // === DEBUG ===
+  async getOrphanedClusterReferences() {
+    try {
+      const query = `
+        SELECT 
+          s.id as solution_id,
+          s.title as solution_title,
+          s.source_cluster_id,
+          s.source_cluster_label,
+          cc.cluster_id as actual_cluster_id,
+          cc.cluster_label as actual_cluster_label
+        FROM dreamteam.solutions s
+        LEFT JOIN dreamteam.cluster_centroids cc ON s.source_cluster_id = cc.cluster_id
+        WHERE s.source_cluster_id IS NOT NULL
+          AND cc.cluster_id IS NULL
+        ORDER BY s.created_at DESC
+      `;
+      const result = await pool.query(query);
+      
+      // Also get count of solutions with valid clusters
+      const validQuery = `
+        SELECT COUNT(*) as valid_count
+        FROM dreamteam.solutions s
+        INNER JOIN dreamteam.cluster_centroids cc ON s.source_cluster_id = cc.cluster_id
+        WHERE s.source_cluster_id IS NOT NULL
+      `;
+      const validResult = await pool.query(validQuery);
+      
+      return {
+        orphaned_solutions: result.rows,
+        orphaned_count: result.rows.length,
+        valid_cluster_references: parseInt(validResult.rows[0].valid_count),
+        message: result.rows.length > 0 ? 
+          'Found solutions referencing non-existent clusters. These clusters may have been deleted or the solutions have stale references.' :
+          'All solution cluster references are valid.'
+      };
+    } catch (error) {
+      console.error('Error checking orphaned cluster references:', error);
       throw error;
     }
   }
@@ -510,6 +637,118 @@ class DatabaseService {
       };
     } catch (error) {
       console.error('Error fetching solution filter options:', error);
+      throw error;
+    }
+  }
+
+  // === SOLUTION CLUSTERS ===
+  async getSolutionClusters(filters = {}) {
+    try {
+      let baseQuery;
+      let params = [];
+      let paramCount = 0;
+      
+      if (filters.version) {
+        baseQuery = `
+          WITH cluster_data AS (
+            SELECT 
+              c.cluster_id,
+              c.cluster_label,
+              c.avg_similarity,
+              c.is_outlier_bucket,
+              COUNT(s.id) as solution_count,
+              COUNT(s.id) as problem_count  -- For UI compatibility
+            FROM dreamteam.solution_cluster_centroids c
+            LEFT JOIN dreamteam.solutions s ON s.solution_cluster_id = c.cluster_id
+            WHERE c.version = $${++paramCount}
+        `;
+        params.push(filters.version);
+      } else {
+        baseQuery = `
+          WITH active_version AS (
+            SELECT COALESCE(
+              (SELECT version FROM dreamteam.solution_cluster_versions WHERE is_active = true),
+              (SELECT MAX(version) FROM dreamteam.solution_cluster_centroids)
+            ) as version
+          ),
+          cluster_data AS (
+            SELECT 
+              c.cluster_id,
+              c.cluster_label,
+              c.avg_similarity,
+              c.is_outlier_bucket,
+              COUNT(s.id) as solution_count,
+              COUNT(s.id) as problem_count  -- For UI compatibility
+            FROM dreamteam.solution_cluster_centroids c
+            LEFT JOIN dreamteam.solutions s ON s.solution_cluster_id = c.cluster_id
+            WHERE c.version = (SELECT version FROM active_version)
+        `;
+      }
+      
+      // Add GROUP BY first
+      baseQuery += `
+            GROUP BY c.cluster_id, c.cluster_label, 
+                     c.avg_similarity, c.is_outlier_bucket
+      `;
+      
+      // Add HAVING clause if needed
+      if (filters.min_solutions) {
+        baseQuery += ` HAVING COUNT(s.id) >= $${++paramCount}`;
+        params.push(parseInt(filters.min_solutions));
+      }
+      
+      // Complete the CTE and main query
+      let query = baseQuery + `
+          )
+          SELECT * FROM cluster_data WHERE 1=1
+      `;
+      
+      // Add search filter
+      if (filters.search) {
+        query += ` AND cluster_label ILIKE $${++paramCount}`;
+        params.push(`%${filters.search}%`);
+      }
+      
+      // Add sorting
+      const sortField = filters.sortBy || 'solution_count';
+      const sortOrder = filters.sortOrder || 'DESC';
+      const validSortFields = ['cluster_label', 'solution_count', 'avg_similarity'];
+      
+      if (validSortFields.includes(sortField)) {
+        query += ` ORDER BY ${sortField} ${sortOrder === 'ASC' ? 'ASC' : 'DESC'}`;
+      } else {
+        query += ` ORDER BY solution_count DESC`;
+      }
+      
+      const result = await pool.query(query, params);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching solution clusters:', error);
+      throw error;
+    }
+  }
+
+  async getSolutionsByClusterId(clusterId) {
+    try {
+      const query = `
+        SELECT 
+          s.id,
+          s.identifier,
+          s.title,
+          s.description,
+          s.overall_viability,
+          s.status,
+          s.tech_stack,
+          s.linear_project_id,
+          s.solution_cluster_similarity as cluster_similarity
+        FROM dreamteam.solutions s
+        WHERE s.solution_cluster_id = $1
+        ORDER BY s.solution_cluster_similarity DESC
+      `;
+      const result = await pool.query(query, [clusterId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching solutions by cluster:', error);
       throw error;
     }
   }

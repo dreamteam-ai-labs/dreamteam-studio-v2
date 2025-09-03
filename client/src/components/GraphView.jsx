@@ -87,16 +87,17 @@ const nodeTypes = {
   custom: CustomNode,
 };
 
-function GraphViewContent() {
+function GraphViewContent({ globalFilters, initialEntityType }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedType, setSelectedType] = useState('all');
+  const [localSearchTerm, setLocalSearchTerm] = useState('');
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [focusedNodeId, setFocusedNodeId] = useState(null);
-  const [showOrphaned, setShowOrphaned] = useState(true); // Toggle for orphaned problems
   const [solutionProblems, setSolutionProblems] = useState({}); // Cache for solution problems
   const { fitView } = useReactFlow(); // Get fitView function from React Flow
+  
+  // Use search term from filters if available, otherwise use local search
+  const searchTerm = globalFilters.searchTerm !== undefined ? globalFilters.searchTerm : localSearchTerm;
 
   // Fetch all data
   const { data: problems } = useQuery({
@@ -105,13 +106,19 @@ function GraphViewContent() {
   });
 
   const { data: clusters } = useQuery({
-    queryKey: ['graph-clusters'],
-    queryFn: () => getClusters({}),
+    queryKey: ['graph-clusters', initialEntityType],
+    queryFn: () => getClusters({}, initialEntityType === 'solutionCluster' ? 'solution' : 'problem'),
   });
 
-  const { data: solutions } = useQuery({
+  const { data: solutions, refetch: refetchSolutions } = useQuery({
     queryKey: ['graph-solutions'],
-    queryFn: () => getSolutions({}),
+    queryFn: async () => {
+      const response = await getSolutions({});
+      console.log('Solutions API Response:', response?.slice(0, 2)); // Log first 2 solutions
+      return response;
+    },
+    staleTime: 0, // Always fetch fresh data
+    refetchOnWindowFocus: true,
   });
 
   const { data: projects } = useQuery({
@@ -119,14 +126,95 @@ function GraphViewContent() {
     queryFn: getProjects,
   });
 
+  // Refetch solutions when viewing solution clusters to ensure we have solution_cluster_id
+  useEffect(() => {
+    if (initialEntityType === 'solutionCluster') {
+      refetchSolutions();
+    }
+  }, [initialEntityType, refetchSolutions]);
+
   // Create searchable items list
   const searchableItems = useMemo(() => {
     const items = [];
     
-    if (selectedType === 'all' || selectedType === 'problem') {
+    if (initialEntityType === 'problem') {
       problems?.forEach(p => {
+        // Apply search filter
+        if (globalFilters.searchTerm) {
+          const term = globalFilters.searchTerm.toLowerCase();
+          if (!p.title?.toLowerCase().includes(term) &&
+              !p.description?.toLowerCase().includes(term) &&
+              !p.cluster_label?.toLowerCase().includes(term)) {
+            return;
+          }
+        }
+        
+        // Apply title filter
+        if (globalFilters.title) {
+          if (!p.title?.toLowerCase().includes(globalFilters.title.toLowerCase())) {
+            return;
+          }
+        }
+        
+        // Apply description filter  
+        if (globalFilters.description) {
+          if (!p.description?.toLowerCase().includes(globalFilters.description.toLowerCase())) {
+            return;
+          }
+        }
+        
+        // Apply cluster label filter
+        if (globalFilters.cluster_label) {
+          if (!p.cluster_label?.toLowerCase().includes(globalFilters.cluster_label.toLowerCase())) {
+            return;
+          }
+        }
+        
+        // Apply impact filter
+        if (globalFilters.impact && globalFilters.impact.length > 0 && !globalFilters.impact.includes(p.impact)) {
+          return;
+        }
+        
+        // Apply industry filter
+        if (globalFilters.industry && globalFilters.industry.length > 0 && !globalFilters.industry.includes(p.industry)) {
+          return;
+        }
+        
+        // Apply business size filter
+        if (globalFilters.businessSize && globalFilters.businessSize.length > 0 && !globalFilters.businessSize.includes(p.business_size)) {
+          return;
+        }
+        
+        // Apply solution count filter
+        if (globalFilters.solution_count !== null && globalFilters.solution_count !== undefined) {
+          if ((p.solution_count || 0) < globalFilters.solution_count) {
+            return;
+          }
+        }
+        
+        // Apply project count filter
+        if (globalFilters.project_count !== null && globalFilters.project_count !== undefined) {
+          if ((p.project_count || 0) < globalFilters.project_count) {
+            return;
+          }
+        }
+        
+        // Apply created date filter
+        if (globalFilters.created_at) {
+          const filterDate = new Date(globalFilters.created_at);
+          const problemDate = new Date(p.created_at);
+          if (problemDate < filterDate) {
+            return;
+          }
+        }
+        
         // Check if cluster actually exists
         const hasActiveCluster = p.cluster_id && clusters?.some(c => (c.cluster_id || c.id) === p.cluster_id);
+        
+        // Apply hasCluster filter
+        if (globalFilters.hasCluster === true && !hasActiveCluster) {
+          return;
+        }
         
         // Check if problem is directly mapped to any solution
         const isDirectlyMapped = solutions?.some(s => {
@@ -143,7 +231,7 @@ function GraphViewContent() {
         const isUnclustered = !p.cluster_id && !p.cluster_label; // Never clustered at all
         
         // Skip orphaned/unclustered problems if filter is off (unless they're directly mapped to solutions)
-        if ((isOrphaned || isUnclustered) && !showOrphaned && !isDirectlyMapped) {
+        if ((isOrphaned || isUnclustered) && !globalFilters.showOrphaned && !isDirectlyMapped) {
           return;
         }
         
@@ -164,22 +252,146 @@ function GraphViewContent() {
       });
     }
     
-    if (selectedType === 'all' || selectedType === 'cluster') {
-      clusters?.forEach(c => items.push({
-        id: `cluster-${c.cluster_id || c.id}`,
-        type: 'cluster',
-        label: c.cluster_label || c.label,
-        entity: c,
-        searchText: `${c.cluster_label || c.label}`.toLowerCase(),
-        badges: [
-          c.problem_count !== undefined && { label: `${c.problem_count}`, color: 'blue' },
-          c.solution_count > 0 && { label: `${c.solution_count} sol`, color: 'green' }
-        ].filter(Boolean)
-      }));
+    if (initialEntityType === 'cluster' || initialEntityType === 'solutionCluster') {
+      // Debug clusters data
+      if (initialEntityType === 'solutionCluster' && clusters?.length > 0) {
+        console.log('Solution Clusters Data:', clusters[0]);
+      }
+      clusters?.forEach(c => {
+        // Apply search filter
+        if (globalFilters.searchTerm) {
+          const term = globalFilters.searchTerm.toLowerCase();
+          if (!(c.cluster_label || c.label || '').toLowerCase().includes(term)) {
+            return;
+          }
+        }
+        
+        // Apply cluster label filter
+        if (globalFilters.cluster_label) {
+          if (!(c.cluster_label || c.label || '').toLowerCase().includes(globalFilters.cluster_label.toLowerCase())) {
+            return;
+          }
+        }
+        
+        // Apply problem count filter
+        if (globalFilters.problem_count !== null && globalFilters.problem_count !== undefined) {
+          if ((c.problem_count || 0) < globalFilters.problem_count) {
+            return;
+          }
+        }
+        
+        // Apply solution count filter
+        if (globalFilters.solution_count !== null && globalFilters.solution_count !== undefined) {
+          if ((c.solution_count || 0) < globalFilters.solution_count) {
+            return;
+          }
+        }
+        
+        // Apply avg similarity filter
+        if (globalFilters.avg_similarity !== null && globalFilters.avg_similarity !== undefined) {
+          if ((parseFloat(c.avg_similarity) || 0) < globalFilters.avg_similarity) {
+            return;
+          }
+        }
+        
+        // Apply status filter
+        if (globalFilters.status && globalFilters.status.length > 0) {
+          const status = c.solution_count > 0 ? 'has-solutions' : 'no-solutions';
+          if (!globalFilters.status.includes(status)) {
+            return;
+          }
+        }
+        
+        items.push({
+          id: `cluster-${c.cluster_id || c.id}`,
+          type: 'cluster',
+          label: c.cluster_label || c.label,
+          entity: c,
+          searchText: `${c.cluster_label || c.label}`.toLowerCase(),
+          badges: [
+            c.problem_count !== undefined && { label: `${c.problem_count}`, color: 'blue' },
+            c.solution_count > 0 && { label: `${c.solution_count} sol`, color: 'green' }
+          ].filter(Boolean)
+        });
+      });
     }
     
-    if (selectedType === 'all' || selectedType === 'solution') {
-      solutions?.forEach(s => items.push({
+    if (initialEntityType === 'solution') {
+      solutions?.forEach(s => {
+        // Apply search filter
+        if (globalFilters.searchTerm) {
+          const term = globalFilters.searchTerm.toLowerCase();
+          if (!s.title?.toLowerCase().includes(term) &&
+              !s.description?.toLowerCase().includes(term) &&
+              !s.identifier?.toLowerCase().includes(term)) {
+            return;
+          }
+        }
+        
+        // Apply title filter
+        if (globalFilters.title) {
+          if (!s.title?.toLowerCase().includes(globalFilters.title.toLowerCase())) {
+            return;
+          }
+        }
+        
+        // Apply status filter
+        if (globalFilters.status && globalFilters.status.length > 0 && !globalFilters.status.includes(s.status)) {
+          return;
+        }
+        
+        // Apply viability filter (use default range if not provided)
+        const viabilityRange = globalFilters.viabilityRange || globalFilters.overall_viability || [0, 100];
+        if (s.overall_viability !== undefined) {
+          if (s.overall_viability < viabilityRange[0] || 
+              s.overall_viability > viabilityRange[1]) {
+            return;
+          }
+        }
+        
+        // Apply LTV/CAC ratio filter
+        if (globalFilters.ltv_cac !== null && globalFilters.ltv_cac !== undefined) {
+          if (s.ltv_estimate && s.cac_estimate && s.cac_estimate > 0) {
+            const ratio = s.ltv_estimate / s.cac_estimate;
+            if (ratio < globalFilters.ltv_cac) {
+              return;
+            }
+          } else {
+            return; // Exclude solutions without LTV/CAC data
+          }
+        }
+        
+        // Apply revenue filter
+        if (globalFilters.revenue !== null && globalFilters.revenue !== undefined) {
+          if ((s.recurring_revenue_potential || 0) < globalFilters.revenue) {
+            return;
+          }
+        }
+        
+        // Apply source cluster filter
+        if (globalFilters.source_cluster) {
+          if (!s.source_cluster_label?.toLowerCase().includes(globalFilters.source_cluster.toLowerCase())) {
+            return;
+          }
+        }
+        
+        // Apply problem count filter
+        if (globalFilters.problem_count !== null && globalFilters.problem_count !== undefined) {
+          if ((s.problem_count || 0) < globalFilters.problem_count) {
+            return;
+          }
+        }
+        
+        // Apply hasProject filter
+        if (globalFilters.hasProject === true) {
+          const hasProject = projects?.some(p => p.solution_id === s.id);
+          if (!hasProject) return;
+        } else if (globalFilters.hasProject === false) {
+          const hasProject = projects?.some(p => p.solution_id === s.id);
+          if (hasProject) return;
+        }
+        
+        items.push({
         id: `solution-${s.id}`,
         type: 'solution',
         label: s.title,
@@ -189,11 +401,74 @@ function GraphViewContent() {
           s.overall_viability && { label: `${s.overall_viability}%`, color: s.overall_viability >= 70 ? 'green' : s.overall_viability >= 50 ? 'yellow' : 'red' },
           s.status && { label: s.status, color: 'gray' }
         ].filter(Boolean)
-      }));
+      });
+    });
     }
     
-    if (selectedType === 'all' || selectedType === 'project') {
-      projects?.forEach(p => items.push({
+    if (initialEntityType === 'project') {
+      projects?.forEach(p => {
+        // Apply search filter
+        if (globalFilters.searchTerm) {
+          const term = globalFilters.searchTerm.toLowerCase();
+          if (!p.name?.toLowerCase().includes(term) &&
+              !p.solution_title?.toLowerCase().includes(term) &&
+              !p.description?.toLowerCase().includes(term) &&
+              !p.github_repo_url?.toLowerCase().includes(term) &&
+              !p.linear_project_id?.toLowerCase().includes(term)) {
+            return;
+          }
+        }
+        
+        // Apply name filter
+        if (globalFilters.name) {
+          if (!p.name?.toLowerCase().includes(globalFilters.name.toLowerCase()) &&
+              !p.solution_title?.toLowerCase().includes(globalFilters.name.toLowerCase())) {
+            return;
+          }
+        }
+        
+        // Apply github filter
+        if (globalFilters.github) {
+          if (!p.github_repo_url?.toLowerCase().includes(globalFilters.github.toLowerCase())) {
+            return;
+          }
+        }
+        
+        // Apply linear filter
+        if (globalFilters.linear) {
+          if (!p.linear_project_id?.toLowerCase().includes(globalFilters.linear.toLowerCase())) {
+            return;
+          }
+        }
+        
+        // Apply viability filter
+        if (globalFilters.viability !== null && globalFilters.viability !== undefined) {
+          // Get viability from the solution if available
+          const solution = solutions?.find(s => s.id === p.solution_id);
+          const viability = solution?.overall_viability || 0;
+          if (viability < globalFilters.viability) {
+            return;
+          }
+        }
+        
+        // Apply status filter
+        if (globalFilters.status && globalFilters.status.length > 0) {
+          const status = p.status || 'active';
+          if (!globalFilters.status.includes(status)) {
+            return;
+          }
+        }
+        
+        // Apply created date filter
+        if (globalFilters.created_at) {
+          const filterDate = new Date(globalFilters.created_at);
+          const projectDate = new Date(p.created_at);
+          if (projectDate < filterDate) {
+            return;
+          }
+        }
+        
+        items.push({
         id: `project-${p.id}`,
         type: 'project',
         label: p.name || p.solution_title || 'Unnamed Project',
@@ -203,11 +478,12 @@ function GraphViewContent() {
           p.linear_project_id && { label: 'active', color: 'green' },
           !p.linear_project_id && { label: 'planned', color: 'gray' }
         ].filter(Boolean)
-      }));
+      });
+    });
     }
     
     return items;
-  }, [problems, clusters, solutions, projects, selectedType, showOrphaned]);
+  }, [problems, clusters, solutions, projects, globalFilters, initialEntityType]);
 
   // Filter items based on search
   const filteredItems = useMemo(() => {
@@ -243,6 +519,17 @@ function GraphViewContent() {
     const focusedItem = searchableItems.find(item => item.id === focusedNodeId);
     
     if (!focusedItem) return;
+    
+    // Debug logging for solution clusters
+    if (initialEntityType === 'solutionCluster' && entityType === 'cluster') {
+      console.log('Processing solution cluster view:', {
+        focusedNodeId,
+        entityType,
+        entityId,
+        focusedItem,
+        initialEntityType
+      });
+    }
 
     // Add the focused node at the center
     const centerNode = {
@@ -254,8 +541,10 @@ function GraphViewContent() {
         label: focusedItem.label,
         subtitle: `${entityType === 'solution' && focusedItem.entity.overall_viability ? 
           `Viability: ${focusedItem.entity.overall_viability}%` : 
-          entityType === 'cluster' && focusedItem.entity.problem_count !== undefined ? 
-          `${focusedItem.entity.problem_count} problems` : 
+          entityType === 'cluster' ? 
+          (initialEntityType === 'solutionCluster' ? 
+            `${focusedItem.entity.solution_count || 0} solutions` : 
+            `${focusedItem.entity.problem_count || 0} problems`) : 
           ''}`
       }
     };
@@ -408,10 +697,53 @@ function GraphViewContent() {
     else if (entityType === 'cluster') {
       const cluster = focusedItem.entity;
       const clusterId = cluster.cluster_id || cluster.id;
+      const isSolutionCluster = initialEntityType === 'solutionCluster';
       
-      // Get problems and solutions
-      const clusterProblems = problems?.filter(p => p.cluster_id === clusterId).slice(0, 12);
-      const clusterSolutions = solutions?.filter(s => s.source_cluster_id === clusterId);
+      // Debug cluster data
+      if (isSolutionCluster) {
+        console.log('Solution Cluster Entity:', cluster);
+        console.log('Using Cluster ID:', clusterId);
+      }
+      
+      // Get problems and solutions based on cluster type
+      const clusterProblems = isSolutionCluster 
+        ? [] // Solution clusters don't have problems
+        : problems?.filter(p => p.cluster_id === clusterId).slice(0, 12);
+      
+      const clusterSolutions = isSolutionCluster
+        ? solutions?.filter(s => {
+            // More detailed debug logging
+            const matches = s.solution_cluster_id === clusterId;
+            if (matches || s.solution_cluster_id) {
+              console.log('Checking solution:', {
+                title: s.title,
+                solution_cluster_id: s.solution_cluster_id,
+                clusterId: clusterId,
+                matches: matches,
+                typeOfSolutionClusterId: typeof s.solution_cluster_id,
+                typeOfClusterId: typeof clusterId
+              });
+            }
+            return matches;
+          }).slice(0, 20) // Get solutions in this solution cluster
+        : solutions?.filter(s => s.source_cluster_id === clusterId); // Get solutions generated from this problem cluster
+      
+      // Debug log
+      if (isSolutionCluster) {
+        console.log('Solution Cluster Graph Debug:');
+        console.log('Cluster ID:', clusterId);
+        console.log('All solutions:', solutions?.length);
+        console.log('Filtered solutions:', clusterSolutions?.length);
+        console.log('First solution example:', solutions?.[0]);
+        console.log('Looking for solutions with solution_cluster_id:', clusterId);
+        // Show which solutions have solution_cluster_id set
+        const solutionsWithClusterId = solutions?.filter(s => s.solution_cluster_id);
+        console.log('Solutions with solution_cluster_id:', solutionsWithClusterId?.length);
+        console.log('Sample solution_cluster_ids:', solutionsWithClusterId?.slice(0, 3).map(s => ({
+          title: s.title,
+          solution_cluster_id: s.solution_cluster_id
+        })));
+      }
       
       // Calculate positions with better spacing
       const problemPositions = calculateNodePositions(clusterProblems.length, 350);
@@ -835,49 +1167,15 @@ function GraphViewContent() {
         <div className="bg-white rounded-lg shadow p-4 flex-1 overflow-hidden flex flex-col">
           <h3 className="text-lg font-semibold mb-4">Entity Explorer</h3>
           
-          {/* Search Input */}
-          <input
-            type="text"
-            placeholder="Search entities..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full px-3 py-2 border rounded-lg mb-3 text-sm"
-          />
-          
-          {/* Type Filter */}
-          <div className="flex gap-1 mb-2">
-            {['all', 'problem', 'cluster', 'solution', 'project'].map(type => (
-              <button
-                key={type}
-                onClick={() => setSelectedType(type)}
-                className={`px-2 py-1 text-xs rounded capitalize ${
-                  selectedType === type
-                    ? 'bg-primary-600 text-white'
-                    : 'bg-gray-100 hover:bg-gray-200'
-                }`}
-              >
-                {type}
-              </button>
-            ))}
-          </div>
-          
-          {/* Orphaned Filter */}
-          {(selectedType === 'all' || selectedType === 'problem') && (
-            <div className="flex items-center gap-2 mb-4 p-2 bg-gray-50 rounded">
-              <input
-                type="checkbox"
-                id="show-orphaned"
-                checked={showOrphaned}
-                onChange={(e) => setShowOrphaned(e.target.checked)}
-                className="rounded"
-              />
-              <label htmlFor="show-orphaned" className="text-xs text-gray-700">
-                Show orphaned/unclustered
-              </label>
-              <span className="text-xs text-gray-500" title="Problems that are either orphaned (cluster deleted) or never clustered. Preserved problems (mapped to solutions) always show.">
-                ⓘ
-              </span>
-            </div>
+          {/* Search Input - only show if we're using local search */}
+          {globalFilters.searchTerm === undefined && (
+            <input
+              type="text"
+              placeholder="Search entities..."
+              value={localSearchTerm}
+              onChange={(e) => setLocalSearchTerm(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg mb-3 text-sm"
+            />
           )}
           
           {/* Entity List */}
@@ -1137,20 +1435,309 @@ function GraphViewContent() {
   );
 }
 
-function GraphView() {
+function GraphView({ initialEntityType = 'problem', filters: externalFilters, hideFilters = false }) {
+  // Use external filters if provided, otherwise use internal state
+  const [internalFilters, setInternalFilters] = useState({
+    entityType: initialEntityType,
+    impact: [],
+    status: [],
+    viabilityRange: [0, 100],
+    hasProject: null,
+    hasCluster: null,
+    showOrphaned: true
+  });
+  
+  // Use external filters if provided, otherwise use internal filters
+  const globalFilters = externalFilters || internalFilters;
+  const setGlobalFilters = externalFilters ? () => {} : setInternalFilters;
+
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="bg-white p-4 rounded-lg shadow">
-        <h2 className="text-lg font-semibold">Relationship Explorer</h2>
-        <p className="text-sm text-gray-600 mt-1">
-          Search and select any entity to explore its relationships
-        </p>
-      </div>
+      {/* Advanced Filtering Header - only show if not hidden */}
+      {!hideFilters && (
+        <div className="bg-white rounded-lg shadow">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold">Filters</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Refine the {globalFilters.entityType}s shown in the graph
+                </p>
+              </div>
+              
+              {/* Reset All button */}
+              <button
+                onClick={() => setGlobalFilters({
+                  entityType: initialEntityType,
+                  impact: [],
+                  status: [],
+                  viabilityRange: [0, 100],
+                  hasProject: null,
+                  hasCluster: null,
+                  showOrphaned: true
+                })}
+                className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+              >
+                Reset Filters
+              </button>
+            </div>
+          </div>
+          
+          {/* Filter Controls based on selected tab */}
+          <div className="p-4 pt-3 border-t bg-gray-50">
+            <div className="flex flex-wrap items-center gap-3">
+            {/* Problems Filters */}
+            {initialEntityType === 'problem' && (
+              <>
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-500 mb-1">Impact</label>
+                  <div className="flex gap-1">
+                    {['high', 'medium', 'low'].map(impact => (
+                    <label key={impact} className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={globalFilters.impact.includes(impact)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setGlobalFilters(prev => ({
+                              ...prev,
+                              impact: [...prev.impact, impact]
+                            }));
+                          } else {
+                            setGlobalFilters(prev => ({
+                              ...prev,
+                              impact: prev.impact.filter(i => i !== impact)
+                            }));
+                          }
+                        }}
+                        className="sr-only"
+                      />
+                      <span className={`px-2 py-1 text-xs rounded cursor-pointer transition-colors ${
+                        globalFilters.impact.includes(impact)
+                          ? impact === 'high' ? 'bg-red-100 text-red-700 ring-1 ring-red-400' 
+                          : impact === 'medium' ? 'bg-yellow-100 text-yellow-700 ring-1 ring-yellow-400'
+                          : 'bg-blue-100 text-blue-700 ring-1 ring-blue-400'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}>
+                        {impact}
+                      </span>
+                    </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-500 mb-1">Clustering</label>
+                  <div className="flex gap-2">
+                    <label className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={globalFilters.hasCluster === true}
+                        onChange={(e) => setGlobalFilters(prev => ({
+                          ...prev,
+                          hasCluster: e.target.checked ? true : null
+                        }))}
+                        className="rounded text-xs"
+                      />
+                      <span className="text-xs">Clustered</span>
+                    </label>
+                    <label className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={globalFilters.showOrphaned}
+                        onChange={(e) => setGlobalFilters(prev => ({
+                          ...prev,
+                          showOrphaned: e.target.checked
+                        }))}
+                        className="rounded text-xs"
+                      />
+                      <span className="text-xs">Show Orphaned</span>
+                    </label>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Clusters Filters */}
+            {(initialEntityType === 'cluster' || initialEntityType === 'solutionCluster') && (
+              <>
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-500 mb-1">Status</label>
+                  <div className="flex gap-1">
+                    {['active', 'inactive'].map(status => (
+                      <label key={status} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={globalFilters.status.includes(status)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setGlobalFilters(prev => ({
+                                ...prev,
+                                status: [...prev.status, status]
+                              }));
+                            } else {
+                              setGlobalFilters(prev => ({
+                                ...prev,
+                                status: prev.status.filter(s => s !== status)
+                              }));
+                            }
+                          }}
+                          className="sr-only"
+                        />
+                        <span className={`px-2 py-1 text-xs rounded cursor-pointer transition-colors ${
+                          globalFilters.status.includes(status)
+                            ? status === 'active' ? 'bg-green-100 text-green-700 ring-1 ring-green-400' 
+                            : 'bg-gray-100 text-gray-700 ring-1 ring-gray-400'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}>
+                          {status}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Solutions Filters */}
+            {initialEntityType === 'solution' && (
+              <>
+                <div className="flex flex-col">
+                <label className="text-xs text-gray-500 mb-1">Status</label>
+                <div className="flex gap-1">
+                  {['active', 'planned', 'inactive'].map(status => (
+                    <label key={status} className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={globalFilters.status.includes(status)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setGlobalFilters(prev => ({
+                              ...prev,
+                              status: [...prev.status, status]
+                            }));
+                          } else {
+                            setGlobalFilters(prev => ({
+                              ...prev,
+                              status: prev.status.filter(s => s !== status)
+                            }));
+                          }
+                        }}
+                        className="sr-only"
+                      />
+                      <span className={`px-2 py-1 text-xs rounded cursor-pointer transition-colors ${
+                        globalFilters.status.includes(status)
+                          ? status === 'active' ? 'bg-green-100 text-green-700 ring-1 ring-green-400' 
+                          : status === 'planned' ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-400'
+                          : 'bg-gray-100 text-gray-700 ring-1 ring-gray-400'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}>
+                        {status}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-500 mb-1">
+                    Viability: {globalFilters.viabilityRange[0]}-{globalFilters.viabilityRange[1]}%
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={globalFilters.viabilityRange[0]}
+                      onChange={(e) => setGlobalFilters(prev => ({
+                        ...prev,
+                        viabilityRange: [parseInt(e.target.value), prev.viabilityRange[1]]
+                      }))}
+                      className="w-20"
+                    />
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={globalFilters.viabilityRange[1]}
+                      onChange={(e) => setGlobalFilters(prev => ({
+                        ...prev,
+                        viabilityRange: [prev.viabilityRange[0], parseInt(e.target.value)]
+                      }))}
+                      className="w-20"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-500 mb-1">Relationships</label>
+                  <div className="flex gap-2">
+                    <label className="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={globalFilters.hasProject === true}
+                        onChange={(e) => setGlobalFilters(prev => ({
+                          ...prev,
+                          hasProject: e.target.checked ? true : null
+                        }))}
+                        className="rounded text-xs"
+                      />
+                      <span className="text-xs">Has Project</span>
+                    </label>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Projects Filters */}
+            {initialEntityType === 'project' && (
+              <>
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-500 mb-1">Status</label>
+                  <div className="flex gap-1">
+                    {['active', 'planned'].map(status => (
+                      <label key={status} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={globalFilters.status.includes(status)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setGlobalFilters(prev => ({
+                                ...prev,
+                                status: [...prev.status, status]
+                              }));
+                            } else {
+                              setGlobalFilters(prev => ({
+                                ...prev,
+                                status: prev.status.filter(s => s !== status)
+                              }));
+                            }
+                          }}
+                          className="sr-only"
+                        />
+                        <span className={`px-2 py-1 text-xs rounded cursor-pointer transition-colors ${
+                          globalFilters.status.includes(status)
+                            ? status === 'active' ? 'bg-green-100 text-green-700 ring-1 ring-green-400' 
+                            : 'bg-blue-100 text-blue-700 ring-1 ring-blue-400'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}>
+                          {status}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Graph Container */}
       <ReactFlowProvider>
-        <GraphViewContent />
+        <GraphViewContent globalFilters={globalFilters} initialEntityType={initialEntityType} />
       </ReactFlowProvider>
     </div>
   );

@@ -192,7 +192,7 @@ export const TAB_COLUMNS = {
 // Default visible columns for each tab
 export const DEFAULT_VISIBLE_COLUMNS = {
   problems: ['title', 'cluster_label', 'impact', 'solution_count'],
-  clusters: ['cluster_label', 'problem_count', 'solution_count', 'status'],
+  clusters: ['cluster_label', 'problem_count', 'solution_count', 'avg_similarity', 'status'],
   solutions: ['title', 'overall_viability', 'revenue', 'status', 'project'],
   projects: ['name', 'github', 'linear', 'viability', 'status'],
 };

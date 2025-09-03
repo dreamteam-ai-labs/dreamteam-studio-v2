@@ -20,18 +20,12 @@ const FiltersSection = memo(function FiltersSection({
   onFilterChange, 
   onClearFilters,
   filterOptions,
-  visibleColumns,
-  onColumnChange
+  visibleColumns
 }) {
   return (
     <div className="bg-white p-4 rounded-lg shadow mb-4">
       <div className="flex justify-between items-start mb-4">
         <h2 className="text-lg font-semibold text-gray-800">Filters</h2>
-        <ColumnSelector 
-          columns={ALL_COLUMNS}
-          selectedColumns={visibleColumns}
-          onColumnChange={onColumnChange}
-        />
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
@@ -410,8 +404,10 @@ function SolutionRow({ solution, visibleColumns }) {
   );
 }
 
-function SolutionsTable() {
-  const [searchTerm, setSearchTerm] = useState(''); // Local search state
+function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFiltered }) {
+  // Use external filters if provided, otherwise use local state
+  const [localSearchTerm, setLocalSearchTerm] = useState(''); // Local search state
+  const searchTerm = externalFilters?.searchTerm ?? localSearchTerm;
   
   // Load saved column preferences or use defaults
   const [visibleColumns, setVisibleColumns] = useState(() => {
@@ -460,19 +456,104 @@ function SolutionsTable() {
   // Client-side filtering for search
   const solutions = useMemo(() => {
     if (!allSolutions) return [];
-    if (!searchTerm) return allSolutions;
     
-    const term = searchTerm.toLowerCase();
-    return allSolutions.filter(solution => 
-      solution.title?.toLowerCase().includes(term) ||
-      solution.description?.toLowerCase().includes(term) ||
-      solution.identifier?.toLowerCase().includes(term)
-    );
-  }, [allSolutions, searchTerm]);
+    let filtered = allSolutions;
+    
+    // Apply search filter
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(solution => 
+        solution.title?.toLowerCase().includes(term) ||
+        solution.description?.toLowerCase().includes(term) ||
+        solution.identifier?.toLowerCase().includes(term)
+      );
+    }
+    
+    // Apply external filters if provided
+    if (externalFilters) {
+      // Title filter
+      if (externalFilters.title) {
+        const titleTerm = externalFilters.title.toLowerCase();
+        filtered = filtered.filter(solution => 
+          solution.title?.toLowerCase().includes(titleTerm)
+        );
+      }
+      
+      // Status filter
+      if (externalFilters.status?.length > 0) {
+        filtered = filtered.filter(solution => 
+          externalFilters.status.includes(solution.status)
+        );
+      }
+      
+      // Viability range filter (renamed from viabilityRange to overall_viability)
+      if (externalFilters.overall_viability) {
+        const [min, max] = externalFilters.overall_viability;
+        filtered = filtered.filter(solution => {
+          const viability = solution.overall_viability || 0;
+          return viability >= min && viability <= max;
+        });
+      }
+      
+      // LTV/CAC filter (minimum ratio)
+      if (externalFilters.ltv_cac !== null && externalFilters.ltv_cac !== undefined) {
+        filtered = filtered.filter(solution => {
+          // Calculate the LTV/CAC ratio if both values exist
+          if (solution.ltv_estimate && solution.cac_estimate && solution.cac_estimate > 0) {
+            const ratio = solution.ltv_estimate / solution.cac_estimate;
+            return ratio >= externalFilters.ltv_cac;
+          }
+          return false; // Exclude solutions without LTV/CAC data
+        });
+      }
+      
+      // Revenue filter (minimum)
+      if (externalFilters.revenue !== null && externalFilters.revenue !== undefined) {
+        filtered = filtered.filter(solution => 
+          (solution.recurring_revenue_potential || 0) >= externalFilters.revenue
+        );
+      }
+      
+      // Source cluster filter
+      if (externalFilters.source_cluster) {
+        const clusterTerm = externalFilters.source_cluster.toLowerCase();
+        filtered = filtered.filter(solution => 
+          solution.source_cluster_label?.toLowerCase().includes(clusterTerm)
+        );
+      }
+      
+      // Problem count filter (minimum)
+      if (externalFilters.problem_count !== null && externalFilters.problem_count !== undefined) {
+        filtered = filtered.filter(solution => 
+          (solution.problem_count || 0) >= externalFilters.problem_count
+        );
+      }
+      
+      // Has project filter
+      if (externalFilters.hasProject === true) {
+        filtered = filtered.filter(solution => solution.linear_project_id);
+      } else if (externalFilters.hasProject === false) {
+        filtered = filtered.filter(solution => !solution.linear_project_id);
+      }
+    }
+    
+    return filtered;
+  }, [allSolutions, searchTerm, externalFilters]);
+
+  // Pass filtered data back to parent
+  useEffect(() => {
+    if (onDataFiltered) {
+      onDataFiltered(solutions);
+    }
+  }, [solutions, onDataFiltered]);
 
   const handleSearchChange = useCallback((value) => {
-    setSearchTerm(value);
-  }, []);
+    if (externalFilters) {
+      onFiltersChange?.(prev => ({ ...prev, searchTerm: value }));
+    } else {
+      setLocalSearchTerm(value);
+    }
+  }, [externalFilters, onFiltersChange]);
 
   const handleFilterChange = useCallback((field, value) => {
     setApiFilters(prev => ({...prev, [field]: value}));
@@ -522,20 +603,34 @@ function SolutionsTable() {
 
   return (
     <div>
-      {/* Memoized Filters Section */}
-      <FiltersSection
-        searchTerm={searchTerm}
-        onSearchChange={handleSearchChange}
-        apiFilters={apiFilters}
-        onFilterChange={handleFilterChange}
-        onClearFilters={handleClearFilters}
-        filterOptions={filterOptions}
-        visibleColumns={visibleColumns}
-        onColumnChange={handleColumnChange}
-      />
+      {/* Only show local filters if no external filters provided */}
+      {!externalFilters && (
+        <FiltersSection
+          searchTerm={searchTerm}
+          onSearchChange={handleSearchChange}
+          apiFilters={apiFilters}
+          onFilterChange={handleFilterChange}
+          onClearFilters={handleClearFilters}
+          filterOptions={filterOptions}
+          visibleColumns={visibleColumns}
+        />
+      )}
 
       {/* Table */}
       <div className={`bg-white rounded-lg shadow table-container ${isResizing ? 'resizing' : ''}`}>
+        {/* Table Header */}
+        <div className="p-4 border-b border-gray-200">
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-gray-800">
+              Solutions ({solutions?.length || 0} total)
+            </h2>
+            <ColumnSelector 
+              columns={ALL_COLUMNS}
+              selectedColumns={visibleColumns}
+              onColumnChange={handleColumnChange}
+            />
+          </div>
+        </div>
         {/* Top scrollbar */}
         <div 
           ref={topScrollRef}

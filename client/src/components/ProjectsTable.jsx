@@ -298,7 +298,7 @@ function ProjectRow({ project, solution, visibleColumns }) {
   );
 }
 
-function ProjectsTable() {
+function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFiltered }) {
   // Load saved column preferences or use defaults
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('projects-visible-columns');
@@ -345,12 +345,96 @@ function ProjectsTable() {
     setTimeout(updateTopScrollWidth, 0);
   }, [updateTopScrollWidth]);
 
+  // Apply external filters if provided
+  const filteredProjects = useMemo(() => {
+    if (!projects) return [];
+    
+    let filtered = projects;
+    
+    // Apply search filter
+    if (externalFilters?.searchTerm) {
+      const term = externalFilters.searchTerm.toLowerCase();
+      filtered = filtered.filter(project => 
+        project.name?.toLowerCase().includes(term) ||
+        project.solution_title?.toLowerCase().includes(term) ||
+        project.description?.toLowerCase().includes(term) ||
+        project.github_repo_url?.toLowerCase().includes(term) ||
+        project.linear_project_id?.toLowerCase().includes(term)
+      );
+    }
+    
+    // Apply external filters if provided
+    if (externalFilters) {
+      // Name filter
+      if (externalFilters.name) {
+        const nameTerm = externalFilters.name.toLowerCase();
+        filtered = filtered.filter(project => 
+          project.name?.toLowerCase().includes(nameTerm) ||
+          project.solution_title?.toLowerCase().includes(nameTerm)
+        );
+      }
+      
+      // GitHub filter
+      if (externalFilters.github) {
+        const githubTerm = externalFilters.github.toLowerCase();
+        filtered = filtered.filter(project => 
+          project.github_repo_url?.toLowerCase().includes(githubTerm)
+        );
+      }
+      
+      // Linear filter
+      if (externalFilters.linear) {
+        const linearTerm = externalFilters.linear.toLowerCase();
+        filtered = filtered.filter(project => 
+          project.linear_project_id?.toLowerCase().includes(linearTerm)
+        );
+      }
+      
+      // Viability filter (minimum)
+      if (externalFilters.viability !== null && externalFilters.viability !== undefined) {
+        filtered = filtered.filter(project => {
+          // Get viability from the solution if available
+          const solution = solutions?.find(s => s.id === project.solution_id);
+          const viability = solution?.overall_viability || 0;
+          return viability >= externalFilters.viability;
+        });
+      }
+      
+      // Status filter
+      if (externalFilters.status?.length > 0) {
+        filtered = filtered.filter(project => {
+          // Default to 'active' if status is not set
+          const status = project.status || 'active';
+          return externalFilters.status.includes(status);
+        });
+      }
+      
+      // Created date filter (after date)
+      if (externalFilters.created_at) {
+        const filterDate = new Date(externalFilters.created_at);
+        filtered = filtered.filter(project => {
+          const projectDate = new Date(project.created_at);
+          return projectDate >= filterDate;
+        });
+      }
+    }
+    
+    return filtered;
+  }, [projects, solutions, externalFilters]);
+
+  // Pass filtered data back to parent
+  useEffect(() => {
+    if (onDataFiltered) {
+      onDataFiltered(filteredProjects);
+    }
+  }, [filteredProjects, onDataFiltered]);
+
   if (projectsLoading) {
     return <div className="text-center py-4">Loading projects...</div>;
   }
 
   // Get solution details for each project
-  const projectsWithDetails = projects?.map(project => {
+  const projectsWithDetails = filteredProjects?.map(project => {
     const solution = solutions?.find(s => s.id === project.solution_id);
     return {
       ...project,
@@ -360,27 +444,21 @@ function ProjectsTable() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="bg-white p-4 rounded-lg shadow mb-4">
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-lg font-semibold">
-              Products Launched ({projects?.length || 0})
-            </h2>
-            <p className="text-sm text-gray-600 mt-1">
-              Successfully launched products from the DreamTeam pipeline
-            </p>
-          </div>
-          <ColumnSelector 
-            columns={ALL_COLUMNS}
-            selectedColumns={visibleColumns}
-            onColumnChange={handleColumnChange}
-          />
-        </div>
-      </div>
-
       {/* Table */}
       <div className={`bg-white rounded-lg shadow table-container ${isResizing ? 'resizing' : ''}`}>
+        {/* Table Header */}
+        <div className="p-4 border-b border-gray-200">
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-gray-800">
+              Products Launched ({projects?.length || 0})
+            </h2>
+            <ColumnSelector 
+              columns={ALL_COLUMNS}
+              selectedColumns={visibleColumns}
+              onColumnChange={handleColumnChange}
+            />
+          </div>
+        </div>
         {/* Top scrollbar */}
         <div 
           ref={topScrollRef}

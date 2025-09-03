@@ -1,11 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Dashboard from './components/Dashboard';
-import ProblemsTableMultiLevel from './components/ProblemsTableMultiLevel';
-import ClustersTable from './components/ClustersTable';
-import SolutionsTable from './components/SolutionsTable';
-import ProjectsTable from './components/ProjectsTable';
-import GraphView from './components/GraphView';
+import EntityView from './components/EntityView';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -60,18 +56,6 @@ function App() {
                       Problems
                     </NavLink>
                     <NavLink
-                      to="/clusters"
-                      className={({ isActive }) =>
-                        `inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                          isActive
-                            ? 'border-primary-500 text-gray-900'
-                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                        }`
-                      }
-                    >
-                      Clusters
-                    </NavLink>
-                    <NavLink
                       to="/solutions"
                       className={({ isActive }) =>
                         `inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
@@ -95,18 +79,6 @@ function App() {
                     >
                       Projects
                     </NavLink>
-                    <NavLink
-                      to="/graph"
-                      className={({ isActive }) =>
-                        `inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                          isActive
-                            ? 'border-primary-500 text-gray-900'
-                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                        }`
-                      }
-                    >
-                      Graph View
-                    </NavLink>
                   </div>
                 </div>
                 <div className="flex items-center">
@@ -122,11 +94,9 @@ function App() {
           <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/problems" element={<ProblemsTableMultiLevel />} />
-              <Route path="/clusters" element={<ClustersTable />} />
-              <Route path="/solutions" element={<SolutionsTable />} />
-              <Route path="/projects" element={<ProjectsTable />} />
-              <Route path="/graph" element={<GraphView />} />
+              <Route path="/problems" element={<EntityView entityType="problem" />} />
+              <Route path="/solutions" element={<EntityView entityType="solution" />} />
+              <Route path="/projects" element={<EntityView entityType="project" />} />
             </Routes>
           </main>
         </div>

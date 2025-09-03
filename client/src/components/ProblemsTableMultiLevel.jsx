@@ -119,7 +119,7 @@ function ProblemSolutions({ problemId, clusterId, clusterLabel }) {
   );
 }
 
-function ProblemsTableMultiLevel() {
+function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, onDataFiltered }) {
   // Load saved column preferences or use defaults
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('problems-visible-columns');
@@ -127,8 +127,17 @@ function ProblemsTableMultiLevel() {
   });
   const [expandedProblems, setExpandedProblems] = useState(new Set());
   const [expandedClusters, setExpandedClusters] = useState(new Set());
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState(''); // Local search state
+  
+  // Use external pagination if provided
+  const currentPage = externalFilters?.currentPage || 1;
+  const setCurrentPage = (page) => {
+    if (onFiltersChange) {
+      onFiltersChange(prev => ({ ...prev, currentPage: page }));
+    }
+  };
+  
+  // Use external search if provided
+  const searchTerm = externalFilters?.searchTerm || '';
   
   // Save column preferences when they change
   useEffect(() => {
@@ -148,12 +157,24 @@ function ProblemsTableMultiLevel() {
     updateTopScrollWidth
   } = useTableFeatures(visibleColumns, useMemo(() => getInitialColumnWidths('problems'), []));
   
+  // Build API filters from external filters if provided
   const [apiFilters, setApiFilters] = useState({
-    impact: '',
+    impact: externalFilters?.impact?.[0] || '',
     cluster_label: '',
     sortBy: 'created_at',
     sortOrder: 'DESC'
   });
+  
+  // Update API filters when external filters change
+  useEffect(() => {
+    if (externalFilters) {
+      setApiFilters(prev => ({
+        ...prev,
+        impact: '', // Let client-side filtering handle this
+        cluster_label: '' // Let client-side filtering handle this
+      }));
+    }
+  }, [externalFilters]);
 
   // Fetch ALL problems (without search filter)
   const { data: allProblems, isLoading } = useQuery({
@@ -162,19 +183,103 @@ function ProblemsTableMultiLevel() {
     refetchOnWindowFocus: false,
   });
 
-  // Client-side filtering for search
+  // Client-side filtering for search and external filters
   const problems = useMemo(() => {
     if (!allProblems) return [];
-    if (!searchTerm) return allProblems;
     
-    const term = searchTerm.toLowerCase();
-    return allProblems.filter(problem => 
-      problem.title?.toLowerCase().includes(term) ||
-      problem.description?.toLowerCase().includes(term) ||
-      problem.cluster_label?.toLowerCase().includes(term) ||
-      problem.identifier?.toLowerCase().includes(term)
-    );
-  }, [allProblems, searchTerm]);
+    let filtered = allProblems;
+    
+    // Apply search term
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(problem => 
+        problem.title?.toLowerCase().includes(term) ||
+        problem.description?.toLowerCase().includes(term) ||
+        problem.cluster_label?.toLowerCase().includes(term) ||
+        problem.identifier?.toLowerCase().includes(term)
+      );
+    }
+    
+    // Apply external filters if provided
+    if (externalFilters) {
+      // Title filter
+      if (externalFilters.title) {
+        const titleTerm = externalFilters.title.toLowerCase();
+        filtered = filtered.filter(problem => 
+          problem.title?.toLowerCase().includes(titleTerm)
+        );
+      }
+      
+      // Description filter
+      if (externalFilters.description) {
+        const descTerm = externalFilters.description.toLowerCase();
+        filtered = filtered.filter(problem => 
+          problem.description?.toLowerCase().includes(descTerm)
+        );
+      }
+      
+      // Cluster label filter
+      if (externalFilters.cluster_label) {
+        const clusterTerm = externalFilters.cluster_label.toLowerCase();
+        filtered = filtered.filter(problem => 
+          problem.cluster_label?.toLowerCase().includes(clusterTerm)
+        );
+      }
+      
+      // Impact filter (multiple selection)
+      if (externalFilters.impact?.length > 0) {
+        filtered = filtered.filter(problem => 
+          externalFilters.impact.includes(problem.impact)
+        );
+      }
+      
+      // Industry filter
+      if (externalFilters.industry?.length > 0) {
+        filtered = filtered.filter(problem => 
+          externalFilters.industry.includes(problem.industry)
+        );
+      }
+      
+      // Business size filter
+      if (externalFilters.businessSize?.length > 0) {
+        filtered = filtered.filter(problem => 
+          externalFilters.businessSize.includes(problem.business_size)
+        );
+      }
+      
+      // Solution count filter (minimum)
+      if (externalFilters.solution_count !== null && externalFilters.solution_count !== undefined) {
+        filtered = filtered.filter(problem => 
+          (problem.solution_count || 0) >= externalFilters.solution_count
+        );
+      }
+      
+      // Project count filter (minimum)
+      if (externalFilters.project_count !== null && externalFilters.project_count !== undefined) {
+        filtered = filtered.filter(problem => 
+          (problem.project_count || 0) >= externalFilters.project_count
+        );
+      }
+      
+      // Created date filter (after date)
+      if (externalFilters.created_at) {
+        const filterDate = new Date(externalFilters.created_at);
+        filtered = filtered.filter(problem => {
+          const problemDate = new Date(problem.created_at);
+          return problemDate >= filterDate;
+        });
+      }
+    }
+    
+    return filtered;
+  }, [allProblems, searchTerm, externalFilters]);
+
+  // Pass filtered data back to parent
+  useEffect(() => {
+    if (onDataFiltered) {
+      onDataFiltered(problems);
+    }
+  }, [problems, onDataFiltered]);
 
   // Fetch filter options
   const { data: filterOptions } = useQuery({
@@ -254,67 +359,72 @@ function ProblemsTableMultiLevel() {
 
   return (
     <div>
-      {/* Filters */}
-      <div className="bg-white p-4 rounded-lg shadow mb-4">
-        <div className="flex justify-between items-start mb-4">
-          <h2 className="text-lg font-semibold">
-            Problems ({totalItems} total) - Multi-Level View
-          </h2>
-          <ColumnSelector 
-            columns={ALL_COLUMNS}
-            selectedColumns={visibleColumns}
-            onColumnChange={handleColumnChange}
-          />
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Search
-            </label>
-            <SearchInput 
-              onSearchChange={(value) => setSearchTerm(value)}
-              placeholder="Search problems..."
-              value={searchTerm}
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Impact Level
-            </label>
-            <select
-              value={apiFilters.impact}
-              onChange={(e) => updateFilter('impact', e.target.value)}
-              className="w-full px-3 py-2 border rounded"
-            >
-              <option value="">All Impact Levels</option>
-              {filterOptions?.impacts?.map(i => (
-                <option key={i} value={i}>{i}</option>
-              ))}
-            </select>
-          </div>
+      {/* Only show local filters if no external filters provided */}
+      {!externalFilters && (
+        <div className="bg-white p-4 rounded-lg shadow mb-4">
+          <h2 className="text-lg font-semibold">Filters</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Search
+              </label>
+              <SearchInput 
+                onSearchChange={(value) => setSearchTerm(value)}
+                placeholder="Search problems..."
+                value={searchTerm}
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Impact Level
+              </label>
+              <select
+                value={apiFilters.impact}
+                onChange={(e) => updateFilter('impact', e.target.value)}
+                className="w-full px-3 py-2 border rounded"
+              >
+                <option value="">All Impact Levels</option>
+                {filterOptions?.impacts?.map(i => (
+                  <option key={i} value={i}>{i}</option>
+                ))}
+              </select>
+            </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Cluster
-            </label>
-            <select
-              value={apiFilters.cluster_label}
-              onChange={(e) => updateFilter('cluster_label', e.target.value)}
-              className="w-full px-3 py-2 border rounded"
-            >
-              <option value="">All Clusters</option>
-              {filterOptions?.cluster_labels?.map(label => (
-                <option key={label} value={label}>{label}</option>
-              ))}
-            </select>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Cluster
+              </label>
+              <select
+                value={apiFilters.cluster_label}
+                onChange={(e) => updateFilter('cluster_label', e.target.value)}
+                className="w-full px-3 py-2 border rounded"
+              >
+                <option value="">All Clusters</option>
+                {filterOptions?.cluster_labels?.map(label => (
+                  <option key={label} value={label}>{label}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Table */}
       <div className={`bg-white rounded-lg shadow table-container ${isResizing ? 'resizing' : ''}`}>
+        {/* Table Header */}
+        <div className="p-4 border-b border-gray-200">
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-gray-800">
+              Problems ({totalItems} total) - Multi-Level View
+            </h2>
+            <ColumnSelector 
+              columns={ALL_COLUMNS}
+              selectedColumns={visibleColumns}
+              onColumnChange={handleColumnChange}
+            />
+          </div>
+        </div>
         {/* Top scrollbar */}
         <div 
           ref={topScrollRef}
