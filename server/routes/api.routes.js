@@ -132,6 +132,15 @@ router.get('/solution-clusters/:id/solutions', async (req, res) => {
 });
 
 // === SOLUTIONS ===
+router.get('/solutions/best-candidate', async (req, res) => {
+  try {
+    const bestCandidate = await databaseService.getBestSolutionCandidate();
+    res.json(bestCandidate);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/solutions', async (req, res) => {
   try {
     const filters = {

@@ -50,6 +50,7 @@ export const getProblemsBySolution = (solutionId) => api.get(`/solutions/${solut
 export const getSolutionsFilterOptions = () => api.get('/solutions/filter-options');
 export const getSolutionsByCluster = (clusterId) => api.get('/solutions', { params: { cluster_id: clusterId } });
 export const getSolutionsByProblem = (problemId) => api.get(`/problems/${problemId}/solutions`);
+export const getBestSolutionCandidate = () => api.get('/solutions/best-candidate');
 
 // Projects
 export const getProjects = () => api.get('/projects');

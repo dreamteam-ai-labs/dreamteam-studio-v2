@@ -11,6 +11,10 @@ function EntityView({ entityType }) {
   const [viewMode, setViewMode] = useState('table');
   const [dataMode, setDataMode] = useState('individual'); // 'individual' or 'clusters'
   const [filteredData, setFilteredData] = useState([]); // Store filtered data from tables
+  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(() => {
+    const saved = localStorage.getItem('entityview-filters-collapsed');
+    return saved === 'true';
+  });
   
   // Unified filters state - these affect both table and graph views
   const [filters, setFilters] = useState({
@@ -253,17 +257,27 @@ function EntityView({ entityType }) {
           </div>
           
           <div className="flex items-center gap-4">
-            {/* Cluster View Checkbox - Only show for problems and solutions */}
+            {/* Cluster View Toggle - Only show for problems and solutions */}
             {(entityType === 'problem' || entityType === 'solution') && (
               <>
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={dataMode === 'clusters'}
-                    onChange={(e) => setDataMode(e.target.checked ? 'clusters' : 'individual')}
-                    className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                  />
                   <span className="text-sm text-gray-700">Cluster View</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={dataMode === 'clusters'}
+                    onClick={() => setDataMode(dataMode === 'clusters' ? 'individual' : 'clusters')}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                      dataMode === 'clusters' ? 'bg-primary-600' : 'bg-gray-200'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        dataMode === 'clusters' ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
                 </label>
                 <div className="h-6 w-px bg-gray-300" /> {/* Divider */}
               </>
@@ -318,12 +332,33 @@ function EntityView({ entityType }) {
                 Applied to both table and graph views - showing options from current data
               </p>
             </div>
-            <button
-              onClick={handleResetFilters}
-              className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors"
-            >
-              Reset Filters
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const newState = !isFiltersCollapsed;
+                  setIsFiltersCollapsed(newState);
+                  localStorage.setItem('entityview-filters-collapsed', newState.toString());
+                }}
+                className="px-3 py-1.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded transition-colors flex items-center gap-1"
+                title={isFiltersCollapsed ? "Show advanced filters" : "Hide advanced filters"}
+              >
+                <span>{isFiltersCollapsed ? 'Show Advanced' : 'Hide Advanced'}</span>
+                <svg 
+                  className={`w-3 h-3 transition-transform ${isFiltersCollapsed ? 'rotate-180' : ''}`}
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <button
+                onClick={handleResetFilters}
+                className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+              >
+                Reset Filters
+              </button>
+            </div>
           </div>
 
           {/* Search Bar - Always visible */}
@@ -338,7 +373,8 @@ function EntityView({ entityType }) {
           </div>
 
           {/* Entity-specific filters */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          {!isFiltersCollapsed && (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 pt-3 border-t border-gray-200">
             {/* Problem Filters - 9 columns */}
             {entityType === 'problem' && dataMode === 'individual' && (
               <>
@@ -494,7 +530,7 @@ function EntityView({ entityType }) {
                     type="date"
                     value={filters.created_at || ''}
                     onChange={(e) => setFilters(prev => ({ ...prev, created_at: e.target.value }))}
-                    className="text-sm border rounded px-2 py-1"
+                    className="text-sm text-gray-700 border rounded px-2 py-1"
                   />
                 </div>
               </>
@@ -880,12 +916,13 @@ function EntityView({ entityType }) {
                     type="date"
                     value={filters.created_at || ''}
                     onChange={(e) => setFilters(prev => ({ ...prev, created_at: e.target.value }))}
-                    className="text-sm border rounded px-2 py-1"
+                    className="text-sm text-gray-700 border rounded px-2 py-1"
                   />
                 </div>
               </>
             )}
           </div>
+          )}
         </div>
       </div>
 

@@ -166,6 +166,7 @@ export const TAB_COLUMNS = {
     { key: 'solution_count', label: 'Solutions', required: false, sortable: true },
     { key: 'avg_similarity', label: 'Avg Similarity', required: false, sortable: true },
     { key: 'status', label: 'Status', required: false, sortable: false },
+    { key: 'created_at', label: 'Created', required: false, sortable: true },
   ],
   
   solutions: [
@@ -177,6 +178,7 @@ export const TAB_COLUMNS = {
     { key: 'problem_count', label: 'Problems', required: false, sortable: true },
     { key: 'status', label: 'Status', required: false, sortable: true },
     { key: 'project', label: 'Project', required: false, sortable: false },
+    { key: 'created_at', label: 'Created', required: false, sortable: true },
   ],
   
   projects: [
@@ -185,16 +187,16 @@ export const TAB_COLUMNS = {
     { key: 'linear', label: 'Linear Project', required: false, sortable: false },
     { key: 'viability', label: 'Viability Score', required: false, sortable: false },
     { key: 'status', label: 'Status', required: false, sortable: false },
-    { key: 'created', label: 'Created', required: false, sortable: false },
+    { key: 'created', label: 'Created', required: false, sortable: true },
   ],
 };
 
 // Default visible columns for each tab
 export const DEFAULT_VISIBLE_COLUMNS = {
-  problems: ['title', 'cluster_label', 'impact', 'solution_count'],
-  clusters: ['cluster_label', 'problem_count', 'solution_count', 'avg_similarity', 'status'],
-  solutions: ['title', 'overall_viability', 'revenue', 'status', 'project'],
-  projects: ['name', 'github', 'linear', 'viability', 'status'],
+  problems: ['title', 'cluster_label', 'impact', 'solution_count', 'created_at'],
+  clusters: ['cluster_label', 'problem_count', 'solution_count', 'avg_similarity', 'created_at'],
+  solutions: ['title', 'overall_viability', 'revenue', 'status', 'created_at'],
+  projects: ['name', 'github', 'linear', 'viability', 'status', 'created'],
 };
 
 // Get initial column widths for a tab

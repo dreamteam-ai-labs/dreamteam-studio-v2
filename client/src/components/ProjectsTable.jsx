@@ -157,6 +157,68 @@ function ProjectRow({ project, solution, visibleColumns }) {
           <td colSpan={visibleColumns.length} className="px-6 py-0">
             <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 mb-4 rounded">
               <div className="space-y-4">
+                {/* Project Details */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">Project Details</h4>
+                  <div className="bg-white p-3 rounded border border-gray-200">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <div className="text-sm space-y-2">
+                          {project.identifier && (
+                            <div>
+                              <span className="text-gray-500">Identifier:</span>
+                              <span className="ml-2 text-gray-900 font-medium">{project.identifier}</span>
+                            </div>
+                          )}
+                          {project.description && (
+                            <div>
+                              <span className="text-gray-500">Description:</span>
+                              <p className="mt-1 text-gray-700">{project.description}</p>
+                            </div>
+                          )}
+                          {project.status && (
+                            <div>
+                              <span className="text-gray-500">Status:</span>
+                              <span className="ml-2">
+                                <span className={`inline-flex px-2 py-0.5 text-xs rounded-full ${
+                                  project.status === 'active' ? 'bg-green-100 text-green-800' :
+                                  project.status === 'planned' ? 'bg-blue-100 text-blue-800' :
+                                  project.status === 'on_hold' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {project.status}
+                                </span>
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-sm space-y-2">
+                          {project.github_repo_name && (
+                            <div>
+                              <span className="text-gray-500">GitHub Repo:</span>
+                              <span className="ml-2 text-gray-900">{project.github_repo_name}</span>
+                            </div>
+                          )}
+                          {project.linear_team_key && (
+                            <div>
+                              <span className="text-gray-500">Linear Team:</span>
+                              <span className="ml-2 text-gray-900">{project.linear_team_key}</span>
+                            </div>
+                          )}
+                          {project.created_at && (
+                            <div>
+                              <span className="text-gray-500">Created:</span>
+                              <span className="ml-2 text-gray-900">{new Date(project.created_at).toLocaleDateString()}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Solution Details */}
                 <div>
                   <h4 className="text-sm font-semibold text-gray-700 mb-2">Solution Details</h4>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import ReactFlow, {
   MiniMap,
   Controls,
@@ -94,7 +94,11 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [focusedNodeId, setFocusedNodeId] = useState(null);
   const [solutionProblems, setSolutionProblems] = useState({}); // Cache for solution problems
+  const [activeTab, setActiveTab] = useState('entities'); // 'entities' or 'details'
+  const [navigationHistory, setNavigationHistory] = useState([]); // Track entity navigation path
   const { fitView } = useReactFlow(); // Get fitView function from React Flow
+  const entityListRef = useRef(null);
+  const entityItemRefs = useRef({});
   
   // Use search term from filters if available, otherwise use local search
   const searchTerm = globalFilters.searchTerm !== undefined ? globalFilters.searchTerm : localSearchTerm;
@@ -112,11 +116,7 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
 
   const { data: solutions, refetch: refetchSolutions } = useQuery({
     queryKey: ['graph-solutions'],
-    queryFn: async () => {
-      const response = await getSolutions({});
-      console.log('Solutions API Response:', response?.slice(0, 2)); // Log first 2 solutions
-      return response;
-    },
+    queryFn: () => getSolutions({}),
     staleTime: 0, // Always fetch fresh data
     refetchOnWindowFocus: true,
   });
@@ -253,10 +253,6 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
     }
     
     if (initialEntityType === 'cluster' || initialEntityType === 'solutionCluster') {
-      // Debug clusters data
-      if (initialEntityType === 'solutionCluster' && clusters?.length > 0) {
-        console.log('Solution Clusters Data:', clusters[0]);
-      }
       clusters?.forEach(c => {
         // Apply search filter
         if (globalFilters.searchTerm) {
@@ -509,26 +505,43 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
       setEdges([]);
       return;
     }
-
     const newNodes = [];
     const newEdges = [];
     const nodeMap = new Map();
     
     // Parse the focused node ID
-    const [entityType, entityId] = focusedNodeId.split('-');
-    const focusedItem = searchableItems.find(item => item.id === focusedNodeId);
+    const [entityType, ...idParts] = focusedNodeId.split('-');
+    const entityId = idParts.join('-');
     
-    if (!focusedItem) return;
+    // Try to find in searchableItems first
+    let focusedItem = searchableItems.find(item => item.id === focusedNodeId);
     
-    // Debug logging for solution clusters
-    if (initialEntityType === 'solutionCluster' && entityType === 'cluster') {
-      console.log('Processing solution cluster view:', {
-        focusedNodeId,
-        entityType,
-        entityId,
-        focusedItem,
-        initialEntityType
-      });
+    // If not found, create it from the actual data
+    if (!focusedItem) {
+      let entity = null;
+      
+      if (entityType === 'problem') {
+        entity = problems?.find(p => p.id === entityId);
+      } else if (entityType === 'cluster') {
+        entity = clusters?.find(c => (c.cluster_id || c.id) === entityId);
+      } else if (entityType === 'solution') {
+        entity = solutions?.find(s => s.id === entityId);
+      } else if (entityType === 'project') {
+        entity = projects?.find(p => p.id === entityId);
+      }
+      
+      if (entity) {
+        focusedItem = {
+          id: focusedNodeId,
+          type: entityType,
+          entity: entity,
+          label: entity.title || entity.name || entity.cluster_label || entity.label
+        };
+      }
+    }
+    
+    if (!focusedItem) {
+      return;
     }
 
     // Add the focused node at the center
@@ -699,51 +712,14 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
       const clusterId = cluster.cluster_id || cluster.id;
       const isSolutionCluster = initialEntityType === 'solutionCluster';
       
-      // Debug cluster data
-      if (isSolutionCluster) {
-        console.log('Solution Cluster Entity:', cluster);
-        console.log('Using Cluster ID:', clusterId);
-      }
-      
       // Get problems and solutions based on cluster type
       const clusterProblems = isSolutionCluster 
         ? [] // Solution clusters don't have problems
         : problems?.filter(p => p.cluster_id === clusterId).slice(0, 12);
       
       const clusterSolutions = isSolutionCluster
-        ? solutions?.filter(s => {
-            // More detailed debug logging
-            const matches = s.solution_cluster_id === clusterId;
-            if (matches || s.solution_cluster_id) {
-              console.log('Checking solution:', {
-                title: s.title,
-                solution_cluster_id: s.solution_cluster_id,
-                clusterId: clusterId,
-                matches: matches,
-                typeOfSolutionClusterId: typeof s.solution_cluster_id,
-                typeOfClusterId: typeof clusterId
-              });
-            }
-            return matches;
-          }).slice(0, 20) // Get solutions in this solution cluster
+        ? solutions?.filter(s => s.solution_cluster_id === clusterId).slice(0, 20) // Get solutions in this solution cluster
         : solutions?.filter(s => s.source_cluster_id === clusterId); // Get solutions generated from this problem cluster
-      
-      // Debug log
-      if (isSolutionCluster) {
-        console.log('Solution Cluster Graph Debug:');
-        console.log('Cluster ID:', clusterId);
-        console.log('All solutions:', solutions?.length);
-        console.log('Filtered solutions:', clusterSolutions?.length);
-        console.log('First solution example:', solutions?.[0]);
-        console.log('Looking for solutions with solution_cluster_id:', clusterId);
-        // Show which solutions have solution_cluster_id set
-        const solutionsWithClusterId = solutions?.filter(s => s.solution_cluster_id);
-        console.log('Solutions with solution_cluster_id:', solutionsWithClusterId?.length);
-        console.log('Sample solution_cluster_ids:', solutionsWithClusterId?.slice(0, 3).map(s => ({
-          title: s.title,
-          solution_cluster_id: s.solution_cluster_id
-        })));
-      }
       
       // Calculate positions with better spacing
       const problemPositions = calculateNodePositions(clusterProblems.length, 350);
@@ -808,9 +784,6 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
       const solution = focusedItem.entity;
       const relatedNodes = [];
       
-      console.log('Building graph for solution:', solution.id);
-      console.log('Cached problems for this solution:', solutionProblems[solution.id]);
-      
       // Collect all related nodes first
       
       // Add source cluster
@@ -833,7 +806,6 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
 
       // Add directly mapped problems from cache if available
       const cachedProblems = solutionProblems[solution.id];
-      console.log('Using cached problems:', cachedProblems);
       if (cachedProblems && cachedProblems.length > 0) {
         cachedProblems.slice(0, 10).forEach(problem => {
           relatedNodes.push({
@@ -1089,18 +1061,80 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
 
   const onNodeClick = useCallback((event, node) => {
     if (node.id !== 'prompt') {
-      setFocusedNodeId(node.id);
-      // Use allItems instead of searchableItems to find any clicked node
-      const item = allItems.find(i => i.id === node.id);
-      if (item) {
-        setSelectedEntity(item.entity);
+      // Check if clicking on the already focused node - if so, just re-center
+      if (node.id === focusedNodeId) {
+        fitView({ 
+          padding: 0.2, 
+          duration: 800,
+          maxZoom: 1.5,
+          minZoom: 0.3
+        });
+        return;
+      }
+      
+      // Parse the node ID to extract entity type and ID
+      const [nodeType, ...idParts] = node.id.split('-');
+      const entityId = idParts.join('-'); // Rejoin in case ID has hyphens
+      
+      // Try to find the entity directly from our data
+      let entity = null;
+      
+      if (nodeType === 'problem') {
+        entity = problems?.find(p => p.id === entityId);
+      } else if (nodeType === 'cluster') {
+        entity = clusters?.find(c => (c.cluster_id || c.id) === entityId);
+      } else if (nodeType === 'solution') {
+        entity = solutions?.find(s => s.id === entityId);
+      } else if (nodeType === 'project') {
+        entity = projects?.find(p => p.id === entityId);
+      }
+      
+      if (entity) {
+        // Refocus the graph on the clicked node
+        setFocusedNodeId(node.id);
+        setSelectedEntity(entity);
+        setActiveTab('details'); // Switch to details tab when clicking a node
+        
+        // Update navigation history
+        setNavigationHistory(prev => {
+          const newHistory = [...prev, {
+            id: node.id,
+            title: entity.title || entity.name || entity.cluster_label || 'Unknown',
+            type: nodeType
+          }].slice(-10);
+          return newHistory;
+        });
+        
+        // Auto-fit view after a short delay to allow nodes to be repositioned
+        setTimeout(() => {
+          fitView({ 
+            padding: 0.2, 
+            duration: 800,
+            maxZoom: 1.5,
+            minZoom: 0.3
+          });
+        }, 100);
       }
     }
-  }, [allItems]);
+  }, [problems, clusters, solutions, projects, focusedNodeId, fitView]);
 
-  const handleItemSelect = (item) => {
+  const handleItemSelect = (item, isFromBreadcrumb = false) => {
     setFocusedNodeId(item.id);
     setSelectedEntity(item.entity);
+    setActiveTab('details'); // Switch to details tab when selecting an entity
+    
+    // Update navigation history
+    if (!isFromBreadcrumb) {
+      // Add to history (max 10 items to prevent infinite growth)
+      setNavigationHistory(prev => {
+        const newHistory = [...prev, {
+          id: item.id,
+          title: item.title || item.entity?.title || item.entity?.name || item.entity?.cluster_label || 'Unknown',
+          type: item.type
+        }].slice(-10);
+        return newHistory;
+      });
+    }
     
     // Auto-fit view after a short delay to allow nodes to be positioned
     setTimeout(() => {
@@ -1112,6 +1146,108 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
       });
     }, 100);
   };
+  
+  // Scroll to selected entity when switching to entities tab
+  useEffect(() => {
+    if (activeTab === 'entities' && focusedNodeId && entityItemRefs.current[focusedNodeId]) {
+      // Small delay to ensure the tab content is rendered
+      setTimeout(() => {
+        entityItemRefs.current[focusedNodeId]?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      }, 100);
+    }
+  }, [activeTab, focusedNodeId]);
+
+  // Handle breadcrumb navigation
+  const navigateToBreadcrumb = useCallback((index) => {
+    const breadcrumbItem = navigationHistory[index];
+    if (!breadcrumbItem) return;
+    
+    // Find the entity
+    let entity = null;
+    const [nodeType, ...idParts] = breadcrumbItem.id.split('-');
+    const entityId = idParts.join('-');
+    
+    if (nodeType === 'problem') {
+      entity = problems?.find(p => p.id === entityId);
+    } else if (nodeType === 'cluster') {
+      entity = clusters?.find(c => (c.cluster_id || c.id) === entityId);
+    } else if (nodeType === 'solution') {
+      entity = solutions?.find(s => s.id === entityId);
+    } else if (nodeType === 'project') {
+      entity = projects?.find(p => p.id === entityId);
+    }
+    
+    if (entity) {
+      // Update selection without adding to history
+      setFocusedNodeId(breadcrumbItem.id);
+      setSelectedEntity(entity);
+      
+      // Trim history to this point
+      setNavigationHistory(prev => prev.slice(0, index + 1));
+      
+      // Re-center the graph
+      setTimeout(() => {
+        fitView({ 
+          padding: 0.2, 
+          duration: 800,
+          maxZoom: 1.5,
+          minZoom: 0.3
+        });
+      }, 100);
+    }
+  }, [navigationHistory, problems, clusters, solutions, projects, fitView]);
+
+  // Navigation functions for Details tab
+  const navigateEntity = useCallback((direction) => {
+    if (!focusedNodeId || filteredItems.length === 0) return;
+    
+    const currentIndex = filteredItems.findIndex(item => item.id === focusedNodeId);
+    if (currentIndex === -1) return;
+    
+    let newIndex;
+    if (direction === 'prev') {
+      newIndex = currentIndex > 0 ? currentIndex - 1 : filteredItems.length - 1;
+    } else {
+      newIndex = currentIndex < filteredItems.length - 1 ? currentIndex + 1 : 0;
+    }
+    
+    const newItem = filteredItems[newIndex];
+    if (newItem) {
+      setFocusedNodeId(newItem.id);
+      setSelectedEntity(newItem.entity);
+      // Stay in details tab when navigating
+      setTimeout(() => {
+        fitView({ 
+          padding: 0.2, 
+          duration: 800,
+          maxZoom: 1.5,
+          minZoom: 0.3
+        });
+      }, 100);
+    }
+  }, [focusedNodeId, filteredItems, fitView]);
+  
+  // Keyboard shortcuts for navigation
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Only work when in details tab and not typing in an input
+      if (activeTab !== 'details' || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        navigateEntity('prev');
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        navigateEntity('next');
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, navigateEntity]);
 
   // Fetch problems for selected solution or project's solution
   useEffect(() => {
@@ -1128,11 +1264,9 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
     }
     
     if (solutionIdToFetch && !solutionProblems[solutionIdToFetch]) {
-      console.log('Fetching problems for solution:', solutionIdToFetch);
       getProblemsBySolution(solutionIdToFetch).then(response => {
         // API returns array directly, or wrapped in response.data
         const problemsData = Array.isArray(response) ? response : (response.data || []);
-        console.log('Problems fetched for solution:', solutionIdToFetch, problemsData);
         setSolutionProblems(prev => ({
           ...prev,
           [solutionIdToFetch]: problemsData
@@ -1163,26 +1297,121 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
     <div className="flex h-[800px] gap-4">
       {/* Left Panel - Search, Selection and Details */}
       <div className="w-96 flex flex-col gap-4">
-        {/* Entity Explorer */}
-        <div className="bg-white rounded-lg shadow p-4 flex-1 overflow-hidden flex flex-col">
-          <h3 className="text-lg font-semibold mb-4">Entity Explorer</h3>
+        {/* Entity Explorer with Tabs */}
+        <div className="bg-white rounded-lg shadow flex-1 overflow-hidden flex flex-col">
+          {/* Tab Headers */}
+          <div className="border-b border-gray-200">
+            <div className="flex">
+              <button
+                onClick={() => setActiveTab('entities')}
+                className={`px-6 py-3 text-sm font-medium transition-colors ${
+                  activeTab === 'entities'
+                    ? 'text-primary-600 border-b-2 border-primary-600 bg-gray-50'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                Entities
+              </button>
+              <button
+                onClick={() => setActiveTab('details')}
+                className={`px-6 py-3 text-sm font-medium transition-colors ${
+                  activeTab === 'details'
+                    ? 'text-primary-600 border-b-2 border-primary-600 bg-gray-50'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                Details
+              </button>
+            </div>
+          </div>
           
-          {/* Search Input - only show if we're using local search */}
-          {globalFilters.searchTerm === undefined && (
-            <input
-              type="text"
-              placeholder="Search entities..."
-              value={localSearchTerm}
-              onChange={(e) => setLocalSearchTerm(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg mb-3 text-sm"
-            />
+          {/* Navigation Breadcrumb */}
+          {navigationHistory.length > 0 && (
+            <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-1 overflow-x-auto">
+              <span className="text-xs text-gray-500 mr-2">Path:</span>
+              {navigationHistory.map((item, index) => {
+                // Use same colors as graph nodes
+                const getItemColors = () => {
+                  if (index === navigationHistory.length - 1) {
+                    // Current item - stronger colors (matching graph nodes)
+                    switch(item.type) {
+                      case 'problem': return 'bg-blue-100 text-blue-800 border-blue-300';
+                      case 'cluster': return 'bg-purple-100 text-purple-800 border-purple-300';
+                      case 'solution': return 'bg-green-100 text-green-800 border-green-300';
+                      case 'project': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+                      default: return 'bg-gray-100 text-gray-800 border-gray-300';
+                    }
+                  } else {
+                    // Previous items - lighter colors on hover (matching graph nodes)
+                    switch(item.type) {
+                      case 'problem': return 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200';
+                      case 'cluster': return 'bg-purple-50 text-purple-700 hover:bg-purple-100 border-purple-200';
+                      case 'solution': return 'bg-green-50 text-green-700 hover:bg-green-100 border-green-200';
+                      case 'project': return 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border-yellow-200';
+                      default: return 'bg-gray-50 text-gray-700 hover:bg-gray-100 border-gray-200';
+                    }
+                  }
+                };
+                
+                return (
+                  <React.Fragment key={index}>
+                    {index > 0 && <span className="text-gray-400 mx-1">→</span>}
+                    <button
+                      onClick={() => navigateToBreadcrumb(index)}
+                      className={`text-xs px-2 py-1 rounded border transition-all ${getItemColors()} ${
+                        index === navigationHistory.length - 1 ? 'font-medium' : ''
+                      }`}
+                      title={item.title}
+                    >
+                      <span className="mr-1">
+                        {item.type === 'problem' && '⚠️'}
+                        {item.type === 'cluster' && '📊'}
+                        {item.type === 'solution' && '💡'}
+                        {item.type === 'project' && '🚀'}
+                      </span>
+                      <span className="max-w-[100px] truncate inline-block align-bottom">
+                        {item.title.length > 20 ? item.title.substring(0, 20) + '...' : item.title}
+                      </span>
+                    </button>
+                  </React.Fragment>
+                );
+              })}
+              {navigationHistory.length > 0 && (
+                <button
+                  onClick={() => setNavigationHistory([])}
+                  className="ml-2 text-xs text-gray-500 hover:text-gray-700 px-2 py-1"
+                  title="Clear navigation history"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           )}
           
-          {/* Entity List */}
-          <div className="space-y-2 overflow-y-auto flex-1">
+          {/* Tab Content */}
+          <div className="flex-1 overflow-hidden p-4">
+            {/* Entities Tab */}
+            {activeTab === 'entities' && (
+              <div className="h-full flex flex-col">
+                <h3 className="text-lg font-semibold mb-4">Browse Entities</h3>
+                
+                {/* Search Input - only show if we're using local search */}
+                {globalFilters.searchTerm === undefined && (
+                  <input
+                    type="text"
+                    placeholder="Search entities..."
+                    value={localSearchTerm}
+                    onChange={(e) => setLocalSearchTerm(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg mb-3 text-sm"
+                  />
+                )}
+                
+                {/* Entity List */}
+                <div className="space-y-2 overflow-y-auto flex-1" ref={entityListRef}>
             {filteredItems.slice(0, 50).map(item => (
               <div
                 key={item.id}
+                ref={el => entityItemRefs.current[item.id] = el}
                 onClick={() => handleItemSelect(item)}
                 className={`p-2 rounded cursor-pointer transition-all ${
                   focusedNodeId === item.id
@@ -1216,187 +1445,365 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
                 </div>
               </div>
             ))}
-            {filteredItems.length > 50 && (
-              <div className="text-xs text-gray-500 text-center py-2">
-                Showing first 50 of {filteredItems.length} results
+                  {filteredItems.length > 50 && (
+                    <div className="text-xs text-gray-500 text-center py-2">
+                      Showing first 50 of {filteredItems.length} results
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {/* Details Tab */}
+            {activeTab === 'details' && (
+              <div className="h-full flex flex-col overflow-y-auto">
+                {selectedEntity ? (
+                  <>
+                    <div className="flex items-start justify-between mb-4">
+                      <h3 className="text-lg font-semibold flex-1 pr-2">
+                        {selectedEntity.title || selectedEntity.name || selectedEntity.cluster_label || 'Entity Details'}
+                      </h3>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => navigateEntity('prev')}
+                          className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+                          title="Previous entity (←)"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                          </svg>
+                        </button>
+                        <span className="text-xs text-gray-500 px-1">
+                          {filteredItems.findIndex(item => item.id === focusedNodeId) + 1} / {filteredItems.length}
+                        </span>
+                        <button
+                          onClick={() => navigateEntity('next')}
+                          className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+                          title="Next entity (→)"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-3 text-sm">
+                      {/* Dynamically render ALL fields from the entity */}
+                      {(() => {
+                        // Define field groups for better organization
+                        const fieldGroups = {
+                          primary: ['id', 'identifier', 'title', 'name', 'cluster_label'],
+                          descriptions: ['description', 'value_proposition', 'problem_details', 'user_context', 'success_criteria', 'primary_feature'],
+                          metrics: ['overall_viability', 'technical_feasibility', 'market_demand', 'competitive_advantage', 'ltv_estimate', 'cac_estimate', 'recurring_revenue_potential', 'problem_count', 'solution_count', 'avg_similarity'],
+                          classifications: ['impact', 'industry', 'business_size', 'status', 'tech_stack', 'source'],
+                          relationships: ['cluster_id', 'cluster_label', 'source_cluster_id', 'source_cluster_label', 'solution_cluster_id', 'solution_cluster_label', 'solution_id', 'problem_id'],
+                          external: ['source_url', 'linear_project_id', 'linear_issue_id', 'github_repo_url'],
+                          metadata: ['created_at', 'updated_at', 'last_problem_fetch', 'version', 'is_outlier_bucket', 'k_value', 'outlier_threshold'],
+                          ignore: ['embedding', 'embedding_normalized', 'cluster_similarity', 'solution_cluster_similarity'] // Fields to skip
+                        };
+                        
+                        const renderedFields = new Set();
+                        const renderField = (key, value) => {
+                          if (value === null || value === undefined || renderedFields.has(key)) return null;
+                          renderedFields.add(key);
+                          
+                          // Format the field name
+                          const fieldName = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                          
+                          // Special rendering for different types
+                          if (key === 'source_url') {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">{fieldName}</div>
+                                <a href={value} target="_blank" rel="noopener noreferrer" 
+                                   className="text-xs text-blue-600 hover:text-blue-800 break-all">
+                                  {value}
+                                </a>
+                              </div>
+                            );
+                          }
+                          
+                          if (key === 'linear_project_id') {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">Linear Project</div>
+                                <a href={`https://linear.app/dreamteam-ai-labs/project/${value}`} 
+                                   target="_blank" rel="noopener noreferrer"
+                                   className="text-xs text-blue-600 hover:text-blue-800">
+                                  View in Linear →
+                                </a>
+                              </div>
+                            );
+                          }
+                          
+                          if (key === 'linear_issue_id') {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">Linear Issue</div>
+                                <a href={`https://linear.app/dreamteam-ai-labs/issue/${value}`} 
+                                   target="_blank" rel="noopener noreferrer"
+                                   className="text-xs text-blue-600 hover:text-blue-800">
+                                  View in Linear →
+                                </a>
+                              </div>
+                            );
+                          }
+                          
+                          if (key === 'github_repo_url') {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">GitHub Repository</div>
+                                <a href={value} target="_blank" rel="noopener noreferrer"
+                                   className="text-xs text-blue-600 hover:text-blue-800">
+                                  View on GitHub →
+                                </a>
+                              </div>
+                            );
+                          }
+                          
+                          if (key.includes('_at') || key === 'last_problem_fetch') {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">{fieldName}</div>
+                                <div className="text-xs text-gray-600">
+                                  {new Date(value).toLocaleDateString('en-US', {
+                                    year: 'numeric', month: 'short', day: 'numeric',
+                                    hour: '2-digit', minute: '2-digit'
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          }
+                          
+                          if (typeof value === 'boolean') {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">{fieldName}</div>
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                  value ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                                }`}>
+                                  {value ? 'Yes' : 'No'}
+                                </span>
+                              </div>
+                            );
+                          }
+                          
+                          if (key === 'impact') {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">{fieldName}</div>
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                  value === 'high' ? 'bg-red-100 text-red-700' :
+                                  value === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                  'bg-blue-100 text-blue-700'
+                                }`}>
+                                  {value.toUpperCase()}
+                                </span>
+                              </div>
+                            );
+                          }
+                          
+                          if (key === 'status') {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">{fieldName}</div>
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                  value === 'active' ? 'bg-green-100 text-green-700' :
+                                  value === 'planned' ? 'bg-blue-100 text-blue-700' :
+                                  'bg-gray-100 text-gray-700'
+                                }`}>
+                                  {value.toUpperCase()}
+                                </span>
+                              </div>
+                            );
+                          }
+                          
+                          if (key.includes('viability') || key.includes('feasibility') || key.includes('demand') || key.includes('advantage')) {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">{fieldName}</div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">{value}%</span>
+                                  <div className="flex-1 bg-gray-200 rounded-full h-2 max-w-[100px]">
+                                    <div className={`h-2 rounded-full ${
+                                      value >= 70 ? 'bg-green-500' :
+                                      value >= 50 ? 'bg-yellow-500' : 'bg-red-500'
+                                    }`} style={{width: `${value}%`}} />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+                          
+                          if (key === 'tech_stack' && Array.isArray(value)) {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">{fieldName}</div>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {value.map((tech, i) => (
+                                    <span key={i} className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs">
+                                      {tech}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          }
+                          
+                          // Long text fields
+                          if (fieldGroups.descriptions.includes(key)) {
+                            return (
+                              <div key={key}>
+                                <div className="text-xs text-gray-500 uppercase">{fieldName}</div>
+                                <div className="text-xs text-gray-700 whitespace-pre-wrap">{value}</div>
+                              </div>
+                            );
+                          }
+                          
+                          // Default rendering
+                          return (
+                            <div key={key}>
+                              <div className="text-xs text-gray-500 uppercase">{fieldName}</div>
+                              <div className="text-xs font-medium">{
+                                typeof value === 'object' ? JSON.stringify(value, null, 2) : value
+                              }</div>
+                            </div>
+                          );
+                        };
+                        
+                        // Render all fields in groups
+                        const sections = [];
+                        
+                        // Primary fields
+                        const primaryFields = Object.entries(selectedEntity)
+                          .filter(([k]) => fieldGroups.primary.includes(k))
+                          .map(([k, v]) => renderField(k, v))
+                          .filter(Boolean);
+                        if (primaryFields.length > 0) {
+                          sections.push(
+                            <div key="primary" className="space-y-2 pb-3 border-b">
+                              {primaryFields}
+                            </div>
+                          );
+                        }
+                        
+                        // Description fields
+                        const descFields = Object.entries(selectedEntity)
+                          .filter(([k]) => fieldGroups.descriptions.includes(k))
+                          .map(([k, v]) => renderField(k, v))
+                          .filter(Boolean);
+                        if (descFields.length > 0) {
+                          sections.push(
+                            <div key="descriptions" className="space-y-2 pb-3 border-b">
+                              <div className="text-xs font-semibold text-gray-700 uppercase mb-1">Details</div>
+                              {descFields}
+                            </div>
+                          );
+                        }
+                        
+                        // Metrics
+                        const metricFields = Object.entries(selectedEntity)
+                          .filter(([k]) => fieldGroups.metrics.includes(k))
+                          .map(([k, v]) => renderField(k, v))
+                          .filter(Boolean);
+                        if (metricFields.length > 0) {
+                          sections.push(
+                            <div key="metrics" className="space-y-2 pb-3 border-b">
+                              <div className="text-xs font-semibold text-gray-700 uppercase mb-1">Metrics</div>
+                              {metricFields}
+                            </div>
+                          );
+                        }
+                        
+                        // Classifications
+                        const classFields = Object.entries(selectedEntity)
+                          .filter(([k]) => fieldGroups.classifications.includes(k))
+                          .map(([k, v]) => renderField(k, v))
+                          .filter(Boolean);
+                        if (classFields.length > 0) {
+                          sections.push(
+                            <div key="classifications" className="space-y-2 pb-3 border-b">
+                              <div className="text-xs font-semibold text-gray-700 uppercase mb-1">Classifications</div>
+                              {classFields}
+                            </div>
+                          );
+                        }
+                        
+                        // Relationships
+                        const relFields = Object.entries(selectedEntity)
+                          .filter(([k]) => fieldGroups.relationships.includes(k))
+                          .map(([k, v]) => renderField(k, v))
+                          .filter(Boolean);
+                        if (relFields.length > 0) {
+                          sections.push(
+                            <div key="relationships" className="space-y-2 pb-3 border-b">
+                              <div className="text-xs font-semibold text-gray-700 uppercase mb-1">Relationships</div>
+                              {relFields}
+                            </div>
+                          );
+                        }
+                        
+                        // External links
+                        const extFields = Object.entries(selectedEntity)
+                          .filter(([k]) => fieldGroups.external.includes(k))
+                          .map(([k, v]) => renderField(k, v))
+                          .filter(Boolean);
+                        if (extFields.length > 0) {
+                          sections.push(
+                            <div key="external" className="space-y-2 pb-3 border-b">
+                              <div className="text-xs font-semibold text-gray-700 uppercase mb-1">External Links</div>
+                              {extFields}
+                            </div>
+                          );
+                        }
+                        
+                        // Metadata
+                        const metaFields = Object.entries(selectedEntity)
+                          .filter(([k]) => fieldGroups.metadata.includes(k))
+                          .map(([k, v]) => renderField(k, v))
+                          .filter(Boolean);
+                        if (metaFields.length > 0) {
+                          sections.push(
+                            <div key="metadata" className="space-y-2 pb-3 border-b">
+                              <div className="text-xs font-semibold text-gray-700 uppercase mb-1">Metadata</div>
+                              {metaFields}
+                            </div>
+                          );
+                        }
+                        
+                        // Any remaining fields not in groups
+                        const allGroupedFields = Object.values(fieldGroups).flat();
+                        const otherFields = Object.entries(selectedEntity)
+                          .filter(([k]) => !allGroupedFields.includes(k) && !fieldGroups.ignore.includes(k))
+                          .map(([k, v]) => renderField(k, v))
+                          .filter(Boolean);
+                        if (otherFields.length > 0) {
+                          sections.push(
+                            <div key="other" className="space-y-2">
+                              <div className="text-xs font-semibold text-gray-700 uppercase mb-1">Additional Fields</div>
+                              {otherFields}
+                            </div>
+                          );
+                        }
+                        
+                        return sections;
+                      })()}
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                    <svg className="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} 
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <p className="text-sm">No entity selected</p>
+                    <p className="text-xs mt-1">Click an entity to view details</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
-
-        {/* Details Panel */}
-        {selectedEntity && (
-          <div className="bg-white rounded-lg shadow p-4 max-h-80 overflow-y-auto">
-            <h3 className="text-sm font-semibold mb-3">Entity Details</h3>
-            <div className="space-y-3 text-sm">
-              {/* Basic Info */}
-              {selectedEntity.title && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Title</div>
-                  <div className="font-medium">{selectedEntity.title}</div>
-                </div>
-              )}
-              {selectedEntity.name && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Name</div>
-                  <div className="font-medium">{selectedEntity.name}</div>
-                </div>
-              )}
-              {selectedEntity.identifier && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Identifier</div>
-                  <div className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded inline-block">
-                    {selectedEntity.identifier}
-                  </div>
-                </div>
-              )}
-              
-              {/* Relationships */}
-              {selectedEntity.cluster_label && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Cluster</div>
-                  <div className="font-medium">{selectedEntity.cluster_label}</div>
-                </div>
-              )}
-              {selectedEntity.source_cluster_label && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Source Cluster</div>
-                  <div className="font-medium">{selectedEntity.source_cluster_label}</div>
-                </div>
-              )}
-              
-              {/* Description */}
-              {selectedEntity.description && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Description</div>
-                  <div className="text-gray-700 text-xs line-clamp-4">{selectedEntity.description}</div>
-                </div>
-              )}
-              {selectedEntity.value_proposition && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Value Proposition</div>
-                  <div className="text-gray-700 text-xs line-clamp-3">{selectedEntity.value_proposition}</div>
-                </div>
-              )}
-              
-              {/* Metrics */}
-              {selectedEntity.overall_viability !== undefined && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Viability Score</div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{selectedEntity.overall_viability}%</span>
-                    <div className="flex-1 bg-gray-200 rounded-full h-2 max-w-[100px]">
-                      <div 
-                        className="bg-green-500 h-2 rounded-full" 
-                        style={{width: `${selectedEntity.overall_viability}%`}}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-              {selectedEntity.problem_count !== undefined && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Problems</div>
-                  <div className="font-medium">{selectedEntity.problem_count}</div>
-                </div>
-              )}
-              {selectedEntity.impact && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Impact</div>
-                  <div className="inline-block">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                      selectedEntity.impact === 'high' ? 'bg-red-100 text-red-700' :
-                      selectedEntity.impact === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-blue-100 text-blue-700'
-                    }`}>
-                      {selectedEntity.impact.toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-              )}
-              
-              {/* Status */}
-              {selectedEntity.status && (
-                <div>
-                  <div className="text-xs text-gray-500 uppercase">Status</div>
-                  <div className="inline-block">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                      selectedEntity.status === 'active' ? 'bg-green-100 text-green-700' :
-                      selectedEntity.status === 'planned' ? 'bg-blue-100 text-blue-700' :
-                      'bg-gray-100 text-gray-700'
-                    }`}>
-                      {selectedEntity.status.toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-              )}
-              
-              {/* External Links */}
-              {(selectedEntity.linear_project_id || selectedEntity.github_repo_url || selectedEntity.linear_issue_id) && (
-                <div className="pt-2 border-t border-gray-200">
-                  <div className="text-xs text-gray-500 uppercase mb-2">External Links</div>
-                  <div className="flex flex-col gap-2">
-                    {selectedEntity.linear_project_id && (
-                      <a 
-                        href={`https://linear.app/dreamteam-ai-labs/project/${selectedEntity.linear_project_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                        View Linear Project
-                      </a>
-                    )}
-                    {selectedEntity.linear_issue_id && (
-                      <a 
-                        href={`https://linear.app/dreamteam-ai-labs/issue/${selectedEntity.linear_issue_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002 2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                        View Linear Issue
-                      </a>
-                    )}
-                    {selectedEntity.github_repo_url && (
-                      <a 
-                        href={selectedEntity.github_repo_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                        </svg>
-                        View GitHub Repository
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
-              
-              {/* Timestamps */}
-              {selectedEntity.created_at && (
-                <div className="pt-2 border-t border-gray-200">
-                  <div className="text-xs text-gray-500 uppercase">Created</div>
-                  <div className="text-xs text-gray-600">
-                    {new Date(selectedEntity.created_at).toLocaleDateString('en-US', {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Right Panel - Graph */}

@@ -5,6 +5,7 @@ import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
 import { useTableFeatures } from '../hooks/useTableFeatures';
+import { usePinnedEntities } from '../hooks/usePinnedEntities';
 import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
 import '../styles/tables.css';
 
@@ -120,6 +121,15 @@ function ProblemSolutions({ problemId, clusterId, clusterLabel }) {
 }
 
 function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, onDataFiltered }) {
+  // Initialize pinning functionality
+  const {
+    pinnedIds,
+    togglePin,
+    isPinned,
+    separateEntities,
+    clearAll
+  } = usePinnedEntities('pinned-problems');
+  
   // Load saved column preferences or use defaults
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('problems-visible-columns');
@@ -127,6 +137,37 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
   });
   const [expandedProblems, setExpandedProblems] = useState(new Set());
   const [expandedClusters, setExpandedClusters] = useState(new Set());
+  const [selectedItems, setSelectedItems] = useState(new Set());
+  
+  // Load collapsed state for filters
+  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(() => {
+    const saved = localStorage.getItem('problems-filters-collapsed');
+    return saved === 'true';
+  });
+  
+  // Selection handlers
+  const handleSelectAll = (problems) => {
+    const allIds = problems.map(p => p.id);
+    if (selectedItems.size === allIds.length && allIds.every(id => selectedItems.has(id))) {
+      // All are selected, so deselect all
+      setSelectedItems(new Set());
+    } else {
+      // Select all
+      setSelectedItems(new Set(allIds));
+    }
+  };
+  
+  const handleSelectItem = (itemId) => {
+    setSelectedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  };
   
   // Use external pagination if provided
   const currentPage = externalFilters?.currentPage || 1;
@@ -362,51 +403,77 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
       {/* Only show local filters if no external filters provided */}
       {!externalFilters && (
         <div className="bg-white p-4 rounded-lg shadow mb-4">
-          <h2 className="text-lg font-semibold">Filters</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Search
-              </label>
-              <SearchInput 
-                onSearchChange={(value) => setSearchTerm(value)}
-                placeholder="Search problems..."
-                value={searchTerm}
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Impact Level
-              </label>
-              <select
-                value={apiFilters.impact}
-                onChange={(e) => updateFilter('impact', e.target.value)}
-                className="w-full px-3 py-2 border rounded"
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold">Filters</h2>
+            <button
+              onClick={() => {
+                const newState = !isFiltersCollapsed;
+                setIsFiltersCollapsed(newState);
+                localStorage.setItem('problems-filters-collapsed', newState.toString());
+              }}
+              className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
+              title={isFiltersCollapsed ? "Show advanced filters" : "Hide advanced filters"}
+            >
+              <span>{isFiltersCollapsed ? 'Show Advanced' : 'Hide Advanced'}</span>
+              <svg 
+                className={`w-4 h-4 transition-transform ${isFiltersCollapsed ? 'rotate-180' : ''}`}
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
               >
-                <option value="">All Impact Levels</option>
-                {filterOptions?.impacts?.map(i => (
-                  <option key={i} value={i}>{i}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Cluster
-              </label>
-              <select
-                value={apiFilters.cluster_label}
-                onChange={(e) => updateFilter('cluster_label', e.target.value)}
-                className="w-full px-3 py-2 border rounded"
-              >
-                <option value="">All Clusters</option>
-                {filterOptions?.cluster_labels?.map(label => (
-                  <option key={label} value={label}>{label}</option>
-                ))}
-              </select>
-            </div>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
           </div>
+          
+          {/* Always show search */}
+          <div className="mb-3">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Search
+            </label>
+            <SearchInput 
+              onSearchChange={(value) => setSearchTerm(value)}
+              placeholder="Search problems..."
+              value={searchTerm}
+            />
+          </div>
+          
+          {/* Collapsible advanced filters */}
+          {!isFiltersCollapsed && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-gray-200">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Impact Level
+                </label>
+                <select
+                  value={apiFilters.impact}
+                  onChange={(e) => updateFilter('impact', e.target.value)}
+                  className="w-full px-3 py-2 border rounded"
+                >
+                  <option value="">All Impact Levels</option>
+                  {filterOptions?.impacts?.map(i => (
+                    <option key={i} value={i}>{i}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Cluster
+                </label>
+                <select
+                  value={apiFilters.cluster_label}
+                  onChange={(e) => updateFilter('cluster_label', e.target.value)}
+                  className="w-full px-3 py-2 border rounded"
+                >
+                  <option value="">All Clusters</option>
+                  {filterOptions?.cluster_labels?.map(label => (
+                    <option key={label} value={label}>{label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -415,9 +482,24 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
         {/* Table Header */}
         <div className="p-4 border-b border-gray-200">
           <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-gray-800">
-              Problems ({totalItems} total) - Multi-Level View
-            </h2>
+            <div className="flex items-center gap-4">
+              <h2 className="text-lg font-semibold text-gray-800">
+                Problems ({totalItems} total) - Multi-Level View
+              </h2>
+              {pinnedIds.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500">
+                    {pinnedIds.length} pinned
+                  </span>
+                  <button
+                    onClick={clearAll}
+                    className="text-sm text-blue-600 hover:text-blue-800 underline"
+                  >
+                    Clear all pins
+                  </button>
+                </div>
+              )}
+            </div>
             <ColumnSelector 
               columns={ALL_COLUMNS}
               selectedColumns={visibleColumns}
@@ -443,6 +525,15 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
           <table className="data-table divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-3 py-3 text-center" style={{ width: '40px' }}>
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                    title="Select all"
+                    checked={currentProblems?.length > 0 && currentProblems.every(p => selectedItems.has(p.id))}
+                    onChange={() => handleSelectAll(currentProblems)}
+                  />
+                </th>
                 {ALL_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(column => (
                   <TableHeader
                     key={column.key}
@@ -454,10 +545,14 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
                     onMouseDown={handleMouseDown}
                   />
                 ))}
+                <th className="px-3 py-3 text-center" style={{ width: '50px' }}>
+                  <span className="sr-only">Pin</span>
+                </th>
               </tr>
             </thead>
           <tbody className="divide-y divide-gray-200">
-            {currentProblems.map((problem) => {
+            {/* Pinned problems first */}
+            {separateEntities(currentProblems).pinned.map((problem) => {
               const isProblemExpanded = expandedProblems.has(problem.id);
               const clusterKey = `${problem.id}-cluster`;
               const isClusterExpanded = expandedClusters.has(clusterKey);
@@ -465,39 +560,44 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
               return (
                 <React.Fragment key={problem.id}>
                   {/* Level 1: Problem Row */}
-                  <tr className="hover:bg-gray-50">
+                  <tr className={`hover:bg-gray-50 ${isPinned(problem.id) ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}>
+                    <td className="px-3 py-3 text-center" style={{ width: '40px' }}>
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                        checked={selectedItems.has(problem.id)}
+                        onChange={() => handleSelectItem(problem.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Select for bulk actions"
+                      />
+                    </td>
                     {visibleColumns.includes('title') && (
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => toggleProblem(problem.id)}
-                          className="text-left w-full"
-                        >
-                          <div className="flex items-start gap-2">
-                            <span className="text-gray-400 mt-0.5">
-                              {isProblemExpanded ? '▼' : '▶'}
-                            </span>
-                            <div>
-                              <p className="text-sm font-medium text-gray-900">{problem.title}</p>
-                              <div className="flex gap-2 mt-1">
-                                {problem.cluster_label && (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                                    📊 {problem.cluster_label}
-                                  </span>
-                                )}
-                                {problem.solution_count > 0 && (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                                    💡 {problem.solution_count} solution{problem.solution_count > 1 ? 's' : ''}
-                                  </span>
-                                )}
-                                {problem.project_count > 0 && (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                                    🚀 {problem.project_count} project{problem.project_count > 1 ? 's' : ''}
-                                  </span>
-                                )}
-                              </div>
+                      <td className="px-4 py-3 cursor-pointer" onClick={() => toggleProblem(problem.id)}>
+                        <div className="flex items-start gap-2">
+                          <span className="text-gray-400 mt-0.5">
+                            {isProblemExpanded ? '▼' : '▶'}
+                          </span>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{problem.title}</p>
+                            <div className="flex gap-2 mt-1">
+                              {problem.cluster_label && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                  📊 {problem.cluster_label}
+                                </span>
+                              )}
+                              {problem.solution_count > 0 && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                  💡 {problem.solution_count} solution{problem.solution_count > 1 ? 's' : ''}
+                                </span>
+                              )}
+                              {problem.project_count > 0 && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                                  🚀 {problem.project_count} project{problem.project_count > 1 ? 's' : ''}
+                                </span>
+                              )}
                             </div>
                           </div>
-                        </button>
+                        </div>
                       </td>
                     )}
                     {visibleColumns.includes('description') && (
@@ -546,12 +646,30 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
                         {new Date(problem.created_at).toLocaleDateString()}
                       </td>
                     )}
+                    <td className="px-3 py-3 text-center" style={{ width: '50px' }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePin(problem.id);
+                        }}
+                        className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
+                          isPinned(problem.id) 
+                            ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
+                            : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                        }`}
+                        title={isPinned(problem.id) ? 'Unpin' : 'Pin to top'}
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+                        </svg>
+                      </button>
+                    </td>
                   </tr>
                   
                   {/* Level 2: Problem Details (when expanded) */}
                   {isProblemExpanded && (
                     <tr>
-                      <td colSpan={visibleColumns.length} className="px-6 py-0">
+                      <td colSpan={visibleColumns.length + 2} className="px-6 py-0">
                         <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 mb-4 rounded">
                           <div className="space-y-4">
                             {/* Problem Details Section */}
@@ -585,8 +703,11 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
                             {/* Solutions Section */}
                             <div>
                               <button
-                                onClick={() => toggleCluster(problem.id, problem.cluster_id)}
-                                className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-3"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleCluster(problem.id, problem.cluster_id);
+                                }}
+                                className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-3 hover:text-gray-900"
                               >
                                 <span className="text-gray-400">
                                   {isClusterExpanded ? '▼' : '▶'}
@@ -595,6 +716,202 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
                                 {problem.solution_count > 0 && (
                                   <span className="text-xs text-gray-500">
                                     ({problem.solution_count} total)
+                                  </span>
+                                )}
+                              </button>
+                              
+                              {/* Expanded Solutions View */}
+                              {isClusterExpanded && (
+                                <ProblemSolutions 
+                                  problemId={problem.id}
+                                  clusterId={problem.cluster_id}
+                                  clusterLabel={problem.cluster_label}
+                                />
+                              )}
+                          </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+            
+            {/* Divider between pinned and unpinned */}
+            {separateEntities(currentProblems).pinned.length > 0 && separateEntities(currentProblems).unpinned.length > 0 && (
+              <tr className="bg-gray-100">
+                <td colSpan={visibleColumns.length + 2} className="px-6 py-2 text-xs text-gray-500 font-medium">
+                  Other Problems
+                </td>
+              </tr>
+            )}
+            
+            {/* Unpinned problems */}
+            {separateEntities(currentProblems).unpinned.map((problem) => {
+              const isProblemExpanded = expandedProblems.has(problem.id);
+              const clusterKey = `${problem.id}-cluster`;
+              const isClusterExpanded = expandedClusters.has(clusterKey);
+
+              return (
+                <React.Fragment key={problem.id}>
+                  {/* Level 1: Problem Row */}
+                  <tr className={`hover:bg-gray-50 ${isPinned(problem.id) ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}>
+                    <td className="px-3 py-3 text-center" style={{ width: '40px' }}>
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                        checked={selectedItems.has(problem.id)}
+                        onChange={() => handleSelectItem(problem.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Select for bulk actions"
+                      />
+                    </td>
+                    {visibleColumns.includes('title') && (
+                      <td className="px-4 py-3 cursor-pointer" onClick={() => toggleProblem(problem.id)}>
+                        <div className="flex items-start gap-2">
+                          <span className="text-gray-400 mt-0.5">
+                            {isProblemExpanded ? '▼' : '▶'}
+                          </span>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{problem.title}</p>
+                            <div className="flex gap-2 mt-1">
+                              {problem.cluster_label && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                  📊 {problem.cluster_label}
+                                </span>
+                              )}
+                              {problem.solution_count > 0 && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                  💡 {problem.solution_count} solution{problem.solution_count > 1 ? 's' : ''}
+                                </span>
+                              )}
+                              {problem.project_count > 0 && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                                  🚀 {problem.project_count} project{problem.project_count > 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    )}
+                    {visibleColumns.includes('description') && (
+                      <td className="px-4 py-3 text-sm text-gray-500">
+                        {problem.description?.substring(0, 100)}...
+                      </td>
+                    )}
+                    {visibleColumns.includes('cluster_label') && (
+                      <td className="px-4 py-3 text-sm">
+                        {problem.cluster_label || '-'}
+                      </td>
+                    )}
+                    {visibleColumns.includes('impact') && (
+                      <td className="px-4 py-3 text-sm">
+                        <span className={`inline-flex px-2 py-1 text-xs rounded-full ${
+                          problem.impact === 'high' ? 'bg-red-100 text-red-800' :
+                          problem.impact === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-green-100 text-green-800'
+                        }`}>
+                          {problem.impact || 'N/A'}
+                        </span>
+                      </td>
+                    )}
+                    {visibleColumns.includes('industry') && (
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {problem.industry || '-'}
+                      </td>
+                    )}
+                    {visibleColumns.includes('business_size') && (
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {problem.business_size || '-'}
+                      </td>
+                    )}
+                    {visibleColumns.includes('solution_count') && (
+                      <td className="px-4 py-3 text-sm">
+                        {problem.solution_count || 0}
+                      </td>
+                    )}
+                    {visibleColumns.includes('project_count') && (
+                      <td className="px-4 py-3 text-sm">
+                        {problem.project_count || 0}
+                      </td>
+                    )}
+                    {visibleColumns.includes('created_at') && (
+                      <td className="px-4 py-3 text-sm text-gray-500">
+                        {new Date(problem.created_at).toLocaleDateString()}
+                      </td>
+                    )}
+                    <td className="px-3 py-3 text-center" style={{ width: '50px' }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePin(problem.id);
+                        }}
+                        className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
+                          isPinned(problem.id) 
+                            ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
+                            : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                        }`}
+                        title={isPinned(problem.id) ? 'Unpin' : 'Pin to top'}
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+                        </svg>
+                      </button>
+                    </td>
+                  </tr>
+                  
+                  {/* Level 2: Problem Details (when expanded) */}
+                  {isProblemExpanded && (
+                    <tr>
+                      <td colSpan={visibleColumns.length + 2} className="px-6 py-0">
+                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 mb-4 rounded">
+                          <div className="space-y-4">
+                            {/* Problem Details Section */}
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-2">Problem Details</h4>
+                              <div className="bg-white p-3 rounded border border-gray-200">
+                                <p className="text-sm text-gray-700">{problem.description}</p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {problem.source_url && (
+                                    <a
+                                      href={problem.source_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-blue-600 hover:text-blue-800"
+                                    >
+                                      🔗 View Source
+                                    </a>
+                                  )}
+                                  <span className="text-xs text-gray-500">
+                                    Created: {new Date(problem.created_at).toLocaleDateString()}
+                                  </span>
+                                  {problem.last_checked && (
+                                    <span className="text-xs text-gray-500">
+                                      Last checked: {new Date(problem.last_checked).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Solutions Section */}
+                            <div className="space-y-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleCluster(problem.id, problem.cluster_id);
+                                }}
+                                className="flex items-center gap-2 text-sm font-semibold text-gray-700 hover:text-primary-600 transition-colors"
+                              >
+                                <span className="text-gray-400">
+                                  {isClusterExpanded ? '▼' : '▶'}
+                                </span>
+                                Solutions
+                                {(problem.solution_count > 0 || problem.cluster_label) && (
+                                  <span className="text-xs text-gray-500 font-normal">
+                                    ({problem.solution_count} direct, cluster solutions available)
                                   </span>
                                 )}
                               </button>

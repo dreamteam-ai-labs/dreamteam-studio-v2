@@ -121,10 +121,12 @@ class DatabaseService {
 
   async checkClusterExists(clusterId) {
     try {
+      // Check if any problems are assigned to this cluster
+      // This is more reliable than checking cluster_centroids which depends on versions
       const query = `
         SELECT EXISTS(
           SELECT 1 
-          FROM dreamteam.cluster_centroids 
+          FROM dreamteam.problems 
           WHERE cluster_id = $1
         ) as exists
       `;
@@ -202,6 +204,7 @@ class DatabaseService {
               c.cluster_label,
               c.avg_similarity,
               c.is_outlier_bucket,
+              c.created_at,
               COUNT(p.id) as problem_count,
               COUNT(DISTINCT s.id) as solution_count
             FROM dreamteam.cluster_centroids c
@@ -215,7 +218,7 @@ class DatabaseService {
       // Add GROUP BY first
       baseQuery += `
             GROUP BY c.cluster_id, c.cluster_label, 
-                     c.avg_similarity, c.is_outlier_bucket
+                     c.avg_similarity, c.is_outlier_bucket, c.created_at
       `;
       
       // Add HAVING filters after GROUP BY
@@ -296,6 +299,77 @@ class DatabaseService {
   }
 
   // === SOLUTIONS ===
+  async getBestSolutionCandidate() {
+    try {
+      const query = `
+        WITH solution_scores AS (
+          SELECT 
+            s.id,
+            s.identifier,
+            s.title,
+            s.description,
+            s.overall_viability,
+            s.ltv_estimate,
+            s.cac_estimate,
+            s.market_size_estimate,
+            COALESCE(
+              s.source_cluster_label, 
+              cc.cluster_label,
+              'Unknown Cluster'
+            ) as source_cluster_label,
+            s.is_saas_compatible,
+            s.value_proposition,
+            s.status,
+            COUNT(DISTINCT psm.problem_id) as problem_count,
+            -- Selection scoring formula
+            s.overall_viability * 0.4 + 
+            LEAST((s.ltv_estimate / NULLIF(s.cac_estimate, 1)) * 5, 50) * 0.3 +
+            (COUNT(DISTINCT psm.problem_id) * 2) * 0.3 as selection_score
+          FROM dreamteam.solutions s
+          LEFT JOIN dreamteam.problem_solution_map psm ON s.id = psm.solution_id
+          LEFT JOIN dreamteam.projects p ON s.id = p.solution_id
+          LEFT JOIN LATERAL (
+            SELECT cluster_label 
+            FROM dreamteam.cluster_centroids 
+            WHERE cluster_id = s.source_cluster_id 
+              AND cluster_label IS NOT NULL
+            ORDER BY version DESC 
+            LIMIT 1
+          ) cc ON s.source_cluster_label IS NULL
+          WHERE s.status = 'candidate'
+            AND s.is_saas_compatible = TRUE
+            AND p.id IS NULL
+          GROUP BY s.id, s.identifier, s.title, s.description, s.overall_viability,
+                   s.ltv_estimate, s.cac_estimate, s.market_size_estimate,
+                   s.source_cluster_label, s.is_saas_compatible,
+                   s.value_proposition, s.status, cc.cluster_label
+        )
+        SELECT 
+          id,
+          identifier,
+          title,
+          description,
+          overall_viability,
+          ltv_estimate,
+          cac_estimate,
+          source_cluster_label,
+          problem_count,
+          ROUND(selection_score::numeric, 1)::float as selection_score,
+          value_proposition,
+          status
+        FROM solution_scores
+        ORDER BY selection_score DESC
+        LIMIT 1
+      `;
+      
+      const result = await pool.query(query);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error getting best solution candidate:', error);
+      return null;
+    }
+  }
+
   async getSolutions(filters = {}) {
     try {
       let query = `
@@ -523,14 +597,28 @@ class DatabaseService {
       const query = `
         SELECT 
           p.id,
+          p.identifier,
           p.name,
+          p.description,
           p.status,
           p.solution_id,
+          p.github_repo_name,
+          p.github_repo_url,
+          p.github_created_at,
+          p.linear_team_id,
+          p.linear_team_key,
+          p.linear_project_id,
+          p.linear_project_url,
+          p.linear_created_at,
+          p.created_at,
           s.title as solution_title,
+          s.description as solution_description,
           s.overall_viability,
-          s.linear_project_id,
-          s.github_repo_url,
-          p.created_at
+          s.primary_feature,
+          s.value_proposition,
+          s.tech_stack,
+          s.linear_project_id as solution_linear_project_id,
+          s.github_repo_url as solution_github_repo_url
         FROM dreamteam.projects p
         LEFT JOIN dreamteam.solutions s ON p.solution_id = s.id
         ORDER BY p.created_at DESC
@@ -677,6 +765,7 @@ class DatabaseService {
               c.cluster_label,
               c.avg_similarity,
               c.is_outlier_bucket,
+              c.created_at,
               COUNT(s.id) as solution_count,
               COUNT(s.id) as problem_count  -- For UI compatibility
             FROM dreamteam.solution_cluster_centroids c
@@ -688,7 +777,7 @@ class DatabaseService {
       // Add GROUP BY first
       baseQuery += `
             GROUP BY c.cluster_id, c.cluster_label, 
-                     c.avg_similarity, c.is_outlier_bucket
+                     c.avg_similarity, c.is_outlier_bucket, c.created_at
       `;
       
       // Add HAVING clause if needed

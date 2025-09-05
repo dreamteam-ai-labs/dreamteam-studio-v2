@@ -23,14 +23,43 @@ const FiltersSection = memo(function FiltersSection({
   visibleColumns,
   entityType = 'problem'
 }) {
+  // Load collapsed state from localStorage
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    const saved = localStorage.getItem('clusters-filters-collapsed');
+    return saved === 'true';
+  });
+
+  // Save collapsed state to localStorage
+  const toggleCollapsed = () => {
+    const newState = !isCollapsed;
+    setIsCollapsed(newState);
+    localStorage.setItem('clusters-filters-collapsed', newState.toString());
+  };
+
   return (
     <div className="bg-white p-4 rounded-lg shadow mb-4">
-      <div className="flex justify-between items-start mb-4">
+      <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold text-gray-800">Filters</h2>
+        <button
+          onClick={toggleCollapsed}
+          className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
+          title={isCollapsed ? "Show advanced filters" : "Hide advanced filters"}
+        >
+          <span>{isCollapsed ? 'Show Advanced' : 'Hide Advanced'}</span>
+          <svg 
+            className={`w-4 h-4 transition-transform ${isCollapsed ? 'rotate-180' : ''}`}
+            fill="none" 
+            stroke="currentColor" 
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div>
+      <div>
+        {/* Always show search */}
+        <div className="mb-3">
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Search
           </label>
@@ -41,47 +70,52 @@ const FiltersSection = memo(function FiltersSection({
           />
         </div>
         
-        {visibleColumns.includes('solution_count') && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Solutions
-            </label>
-            <select
-              value={apiFilters.has_solutions}
-              onChange={(e) => onFilterChange('has_solutions', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+        {/* Collapsible advanced filters */}
+        {!isCollapsed && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-gray-200">
+          {visibleColumns.includes('solution_count') && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Solutions
+              </label>
+              <select
+                value={apiFilters.has_solutions}
+                onChange={(e) => onFilterChange('has_solutions', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="">All</option>
+                <option value="true">Has Solutions</option>
+                <option value="false">No Solutions</option>
+              </select>
+            </div>
+          )}
+
+          {visibleColumns.includes('problem_count') && entityType === 'problem' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Min Problems
+              </label>
+              <input
+                type="number"
+                value={apiFilters.min_problems}
+                onChange={(e) => onFilterChange('min_problems', e.target.value)}
+                placeholder="0"
+                min="0"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+          )}
+
+          <div className="flex items-end">
+            <button
+              onClick={onClearFilters}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
             >
-              <option value="">All</option>
-              <option value="true">Has Solutions</option>
-              <option value="false">No Solutions</option>
-            </select>
+              Clear Filters
+            </button>
           </div>
-        )}
-
-        {visibleColumns.includes('problem_count') && entityType === 'problem' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Min Problems
-            </label>
-            <input
-              type="number"
-              value={apiFilters.min_problems}
-              onChange={(e) => onFilterChange('min_problems', e.target.value)}
-              placeholder="0"
-              min="0"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-          </div>
-        )}
-
-        <div className="flex items-end">
-          <button
-            onClick={onClearFilters}
-            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-          >
-            Clear Filters
-          </button>
         </div>
+      )}
       </div>
     </div>
   );
@@ -226,6 +260,12 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem' }) {
                 Generate Solution →
               </button>
             )}
+          </td>
+        )}
+        
+        {visibleColumns.includes('created_at') && (
+          <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '120px' }}>
+            {cluster.created_at ? new Date(cluster.created_at).toLocaleDateString() : 'N/A'}
           </td>
         )}
       </tr>
