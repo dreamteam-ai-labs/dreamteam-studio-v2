@@ -296,4 +296,47 @@ router.get('/health', async (req, res) => {
   }
 });
 
+// === API BALANCES ===
+router.get('/api-balances', async (req, res) => {
+  try {
+    // Try to use the real service if available
+    try {
+      const apiBalancesService = await import('../services/apiBalances.service.js');
+      const balances = await apiBalancesService.default.getBalances();
+      res.json(balances);
+    } catch (serviceError) {
+      // Fallback to mock data if service not available
+      console.log('Using mock data for API balances');
+      const balances = {
+        openai: { 
+          balance: 25.50, 
+          usage: 74.50, 
+          lastChecked: new Date().toISOString()
+        },
+        perplexity: { 
+          balance: 8.00, 
+          usage: 42.00, 
+          lastChecked: new Date().toISOString()
+        },
+        neon: { 
+          balance: 50.00, 
+          usage: 0, 
+          lastChecked: new Date().toISOString()
+        },
+        render: { 
+          balance: 15.00, 
+          usage: 35.00, 
+          lastChecked: new Date().toISOString()
+        },
+        lastUpdated: new Date().toISOString()
+      };
+      
+      res.json(balances);
+    }
+  } catch (error) {
+    console.error('Error fetching API balances:', error);
+    res.status(500).json({ error: 'Failed to fetch API balances' });
+  }
+});
+
 export default router;

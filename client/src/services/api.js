@@ -68,4 +68,7 @@ export const triggerF4 = (solutionId) => api.post('/workflows/f4/trigger', { sol
 // Health Check
 export const checkHealth = () => api.get('/health');
 
+// API Balances
+export const getApiBalances = () => api.get('/api-balances');
+
 export default api;

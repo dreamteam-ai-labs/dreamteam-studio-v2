@@ -4,6 +4,7 @@ import { getSolutions, getProblemsBySolution, getProblemsByCluster, getSolutions
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
+import StudyModeModal from './StudyModeModal';
 import { useTableFeatures } from '../hooks/useTableFeatures';
 import { usePinnedEntities } from '../hooks/usePinnedEntities';
 import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
@@ -141,7 +142,7 @@ const FiltersSection = memo(function FiltersSection({
 });
 
 // Solution row component for expandable functionality
-function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTogglePin, isSelected, onToggleSelect }) {
+function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTogglePin, isSelected, onToggleSelect, onStudy }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Get problems directly linked to solution
@@ -238,6 +239,12 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
           </td>
         )}
         
+        {visibleColumns.includes('candidate_score') && (
+          <td className="px-6 py-4 text-sm font-medium text-gray-900 text-center cursor-pointer" style={{ width: '80px' }} onClick={() => setIsExpanded(!isExpanded)}>
+            {solution.candidate_score ? parseFloat(solution.candidate_score).toFixed(1) : '0.0'}
+          </td>
+        )}
+        
         {visibleColumns.includes('ltv_cac') && (
           <td className="px-6 py-4 text-sm text-gray-900 text-center cursor-pointer" style={{ width: '140px' }} onClick={() => setIsExpanded(!isExpanded)}>
             {solution.ltv_estimate && solution.cac_estimate ? 
@@ -296,23 +303,37 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
             {solution.created_at ? new Date(solution.created_at).toLocaleDateString() : 'N/A'}
           </td>
         )}
-        <td className="px-3 py-4 text-center" style={{ width: '50px' }}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onTogglePin(solution.id);
-            }}
-            className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
-              isPinned 
-                ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
-                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-            }`}
-            title={isPinned ? 'Unpin' : 'Pin to top'}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
-            </svg>
-          </button>
+        <td className="px-3 py-4 text-center" style={{ width: '100px' }}>
+          <div className="flex gap-1 justify-center">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onStudy(solution, 'solution');
+              }}
+              className="p-2 rounded-lg transition-all transform hover:scale-110 text-purple-500 hover:text-purple-700 hover:bg-purple-100"
+              title="Study this solution"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+              </svg>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onTogglePin(solution.id);
+              }}
+              className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
+                isPinned 
+                  ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+              title={isPinned ? 'Unpin' : 'Pin to top'}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+              </svg>
+            </button>
+          </div>
         </td>
       </tr>
       
@@ -508,6 +529,9 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
   
   // Selection state
   const [selectedItems, setSelectedItems] = useState(new Set());
+  const [studyModalOpen, setStudyModalOpen] = useState(false);
+  const [studyEntity, setStudyEntity] = useState(null);
+  const [studyEntityType, setStudyEntityType] = useState(null);
   
   // Selection handlers
   const handleSelectAll = (solutions) => {
@@ -531,6 +555,12 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
       }
       return newSet;
     });
+  };
+  
+  const openStudyMode = (entity, type) => {
+    setStudyEntity(entity);
+    setStudyEntityType(type);
+    setStudyModalOpen(true);
   };
   
   // Save column preferences when they change
@@ -848,6 +878,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                     onTogglePin={togglePin}
                     isSelected={selectedItems.has(solution.id)}
                     onToggleSelect={() => handleSelectItem(solution.id)}
+                    onStudy={openStudyMode}
                   />
                 ))}
                 {/* Divider between pinned and unpinned */}
@@ -869,6 +900,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                     onTogglePin={togglePin}
                     isSelected={selectedItems.has(solution.id)}
                     onToggleSelect={() => handleSelectItem(solution.id)}
+                    onStudy={openStudyMode}
                   />
                 ))}
               </>
@@ -877,6 +909,14 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
         </table>
         </div>
       </div>
+      
+      {/* Study Mode Modal */}
+      <StudyModeModal 
+        isOpen={studyModalOpen}
+        onClose={() => setStudyModalOpen(false)}
+        initialEntity={studyEntity}
+        entityType={studyEntityType}
+      />
     </div>
   );
 }

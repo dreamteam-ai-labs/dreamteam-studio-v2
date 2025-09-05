@@ -156,7 +156,15 @@ class DatabaseService {
         LEFT JOIN dreamteam.problem_solution_map psm ON p.id = psm.problem_id
         WHERE p.cluster_id = $1
         GROUP BY p.id
-        ORDER BY p.cluster_similarity DESC NULLS LAST
+        ORDER BY 
+          CASE p.impact::text
+            WHEN 'critical' THEN 1
+            WHEN 'high' THEN 2
+            WHEN 'medium' THEN 3
+            WHEN 'low' THEN 4
+            ELSE 5
+          END,
+          p.cluster_similarity DESC NULLS LAST
       `;
       const result = await pool.query(query, [clusterId]);
       return result.rows;
@@ -288,7 +296,15 @@ class DatabaseService {
         FROM dreamteam.problems p
         INNER JOIN dreamteam.problem_solution_map psm ON p.id = psm.problem_id
         WHERE psm.solution_id = $1
-        ORDER BY p.impact DESC, p.created_at DESC
+        ORDER BY 
+          CASE p.impact::text
+            WHEN 'critical' THEN 1
+            WHEN 'high' THEN 2
+            WHEN 'medium' THEN 3
+            WHEN 'low' THEN 4
+            ELSE 5
+          END,
+          p.created_at DESC
       `;
       const result = await pool.query(query, [solutionId]);
       return result.rows;
@@ -321,10 +337,8 @@ class DatabaseService {
             s.value_proposition,
             s.status,
             COUNT(DISTINCT psm.problem_id) as problem_count,
-            -- Selection scoring formula
-            s.overall_viability * 0.4 + 
-            LEAST((s.ltv_estimate / NULLIF(s.cac_estimate, 1)) * 5, 50) * 0.3 +
-            (COUNT(DISTINCT psm.problem_id) * 2) * 0.3 as selection_score
+            -- Use the database-calculated candidate_score
+            s.candidate_score as selection_score
           FROM dreamteam.solutions s
           LEFT JOIN dreamteam.problem_solution_map psm ON s.id = psm.solution_id
           LEFT JOIN dreamteam.projects p ON s.id = p.solution_id
@@ -354,7 +368,7 @@ class DatabaseService {
           cac_estimate,
           source_cluster_label,
           problem_count,
-          ROUND(selection_score::numeric, 1)::float as selection_score,
+          selection_score,
           value_proposition,
           status
         FROM solution_scores
@@ -381,6 +395,7 @@ class DatabaseService {
           s.value_proposition,
           s.primary_feature,
           s.overall_viability,
+          s.candidate_score,
           s.technical_feasibility,
           s.market_demand,
           s.competitive_advantage,
@@ -395,7 +410,8 @@ class DatabaseService {
           s.github_repo_url,
           s.created_at,
           s.status,
-          COUNT(psm.problem_id) as problem_count
+          COUNT(psm.problem_id) as problem_count,
+          ARRAY_AGG(psm.problem_id) FILTER (WHERE psm.problem_id IS NOT NULL) as problem_ids
         FROM dreamteam.solutions s
         LEFT JOIN dreamteam.problem_solution_map psm ON s.id = psm.solution_id
         WHERE 1=1
@@ -437,7 +453,7 @@ class DatabaseService {
       // Add sorting
       const sortField = filters.sortBy || 'overall_viability';
       const sortOrder = filters.sortOrder || 'DESC';
-      const validSortFields = ['title', 'overall_viability', 'status', 'created_at', 'ltv_estimate', 'recurring_revenue_potential', 'problem_count'];
+      const validSortFields = ['title', 'overall_viability', 'candidate_score', 'status', 'created_at', 'ltv_estimate', 'recurring_revenue_potential', 'problem_count'];
       
       if (validSortFields.includes(sortField)) {
         if (sortField === 'problem_count') {

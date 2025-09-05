@@ -3,11 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { getPipelineStats, getProblems, getClusters, getSolutions, getBestSolutionCandidate } from '../services/api';
 import { usePinnedEntities } from '../hooks/usePinnedEntities';
+import { ExternalLink } from 'lucide-react';
+import StudyModeModal from './StudyModeModal';
 
 function Dashboard() {
   const navigate = useNavigate();
   const [pinnedProblems, setPinnedProblems] = useState([]);
   const [pinnedSolutions, setPinnedSolutions] = useState([]);
+  const [studyModeEntity, setStudyModeEntity] = useState(null);
   
   // Initialize pinning hooks
   const problemPins = usePinnedEntities('pinned-problems');
@@ -107,25 +110,25 @@ function Dashboard() {
                 <p className="text-gray-600 text-sm mt-2">{bestCandidate.description}</p>
               </div>
             </div>
-            <div className="ml-4 flex flex-col gap-2">
+            <div className="ml-4 flex items-center justify-center">
               <button
-                onClick={() => navigate('/solutions')}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                onClick={() => {
+                  console.log('Opening study mode for best candidate:', bestCandidate);
+                  setStudyModeEntity({ type: 'solution', data: bestCandidate });
+                }}
+                className="p-2 rounded-lg transition-all transform hover:scale-110 text-purple-500 hover:text-purple-700 hover:bg-purple-100"
+                title="Study this solution"
               >
-                View Solution
-              </button>
-              <button
-                onClick={() => navigate('/graph')}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-              >
-                Explore Graph
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                </svg>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Key Metrics Grid */}
+      {/* Key Metrics Grid with Integrated Pipeline Health */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           title="Problem Pipeline"
@@ -135,6 +138,8 @@ function Dashboard() {
           color="blue"
           onClick={() => navigate('/problems')}
           trend={unclusteredCount > 0 ? 'action' : 'good'}
+          progress={totalProblems > 0 ? ((totalProblems - unclusteredCount) / totalProblems) * 100 : 0}
+          progressLabel="Coverage"
         />
         <MetricCard
           title="Cluster Health"
@@ -142,8 +147,10 @@ function Dashboard() {
           label="Active Clusters"
           submetric={`${clustersWithoutSolutions} need solutions`}
           color="purple"
-          onClick={() => navigate('/clusters')}
+          onClick={() => navigate('/problems', { state: { viewMode: 'cluster' } })}
           trend={clustersWithoutSolutions > 0 ? 'action' : 'good'}
+          progress={stats?.total_clusters > 0 ? ((stats.total_clusters - clustersWithoutSolutions) / stats.total_clusters) * 100 : 0}
+          progressLabel="Utilization"
         />
         <MetricCard
           title="Solution Quality"
@@ -153,6 +160,8 @@ function Dashboard() {
           color="green"
           onClick={() => navigate('/solutions')}
           trend="good"
+          progress={stats?.total_solutions > 0 ? (highViabilitySolutions / stats.total_solutions) * 100 : 0}
+          progressLabel="Quality"
         />
         <MetricCard
           title="Active Projects"
@@ -162,10 +171,12 @@ function Dashboard() {
           color="yellow"
           onClick={() => navigate('/projects')}
           trend="neutral"
+          progress={highViabilitySolutions > 0 ? (solutionsWithProjects / highViabilitySolutions) * 100 : 0}
+          progressLabel="Conversion"
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Pinned & Recent Problems */}
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center justify-between mb-4">
@@ -267,49 +278,79 @@ function Dashboard() {
             ))}
           </div>
         </div>
-      </div>
 
-      {/* Pipeline Health */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Pipeline Health Status</h2>
-        <p className="text-sm text-gray-600 mb-4">Current state of your problem-to-solution pipeline</p>
-        <div className="space-y-4">
-          <ProgressBar
-            label="Problem Coverage"
-            value={totalProblems > 0 ? ((totalProblems - unclusteredCount) / totalProblems) * 100 : 0}
-            color="blue"
-            info={`${totalProblems - unclusteredCount} of ${totalProblems} problems clustered`}
-          />
-          <ProgressBar
-            label="Cluster Utilization"
-            value={stats?.total_clusters > 0 ? ((stats.total_clusters - clustersWithoutSolutions) / stats.total_clusters) * 100 : 0}
-            color="purple"
-            info={`${stats?.total_clusters - clustersWithoutSolutions} of ${stats?.total_clusters} clusters have solutions`}
-          />
-          <ProgressBar
-            label="Solution Quality"
-            value={stats?.total_solutions > 0 ? (highViabilitySolutions / stats.total_solutions) * 100 : 0}
-            color="green"
-            info={`${highViabilitySolutions} of ${stats?.total_solutions} solutions are high viability (≥80%)`}
-          />
-          <ProgressBar
-            label="Project Conversion"
-            value={highViabilitySolutions > 0 ? (solutionsWithProjects / highViabilitySolutions) * 100 : 0}
-            color="yellow"
-            info={`${solutionsWithProjects} of ${highViabilitySolutions} high-viability solutions have projects`}
-          />
+        {/* API Provider Billing Links */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">💳 API Billing</h2>
+          </div>
+          <div className="space-y-2">
+            <BillingLink 
+              name="OpenAI" 
+              url="https://platform.openai.com/settings/organization/billing/overview" 
+              color="green"
+              description="GPT Models"
+            />
+            <BillingLink 
+              name="Anthropic" 
+              url="https://console.anthropic.com/settings/billing" 
+              color="purple"
+              description="Claude API"
+            />
+            <BillingLink 
+              name="Perplexity" 
+              url="https://www.perplexity.ai/account/api/billing" 
+              color="blue"
+              description="Search API"
+            />
+            <BillingLink 
+              name="Neon" 
+              url="https://console.neon.tech/app/billing" 
+              color="orange"
+              description="PostgreSQL"
+            />
+            <BillingLink 
+              name="Render" 
+              url="https://dashboard.render.com/billing" 
+              color="pink"
+              description="App Hosting"
+            />
+            <BillingLink 
+              name="Linear" 
+              url="https://linear.app/settings/billing" 
+              color="indigo"
+              description="Project Mgmt"
+            />
+          </div>
         </div>
       </div>
+      
+      {/* Study Mode Modal */}
+      {studyModeEntity && (
+        <StudyModeModal
+          isOpen={!!studyModeEntity}
+          entityType={studyModeEntity.type}
+          initialEntity={studyModeEntity.data}
+          onClose={() => setStudyModeEntity(null)}
+        />
+      )}
     </div>
   );
 }
 
-function MetricCard({ title, metric, label, submetric, color, onClick, trend }) {
+function MetricCard({ title, metric, label, submetric, color, onClick, trend, progress, progressLabel }) {
   const colorClasses = {
     blue: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
     purple: 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100',
     green: 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100',
     yellow: 'bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100',
+  };
+
+  const progressBarClasses = {
+    blue: 'bg-blue-500',
+    purple: 'bg-purple-500',
+    green: 'bg-green-500',
+    yellow: 'bg-yellow-500',
   };
 
   const trendIcons = {
@@ -331,33 +372,55 @@ function MetricCard({ title, metric, label, submetric, color, onClick, trend }) 
         <div className="text-3xl font-bold">{metric}</div>
         <div className="text-sm font-medium opacity-80">{label}</div>
         <div className="text-xs opacity-70">{submetric}</div>
+        
+        {/* Mini Progress Bar */}
+        {progress !== undefined && (
+          <div className="mt-2 pt-2 border-t border-opacity-30">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-xs font-medium opacity-80">{progressLabel}</span>
+              <span className="text-xs opacity-70">{Math.round(progress)}%</span>
+            </div>
+            <div className="w-full bg-white bg-opacity-50 rounded-full h-1.5">
+              <div
+                className={`${progressBarClasses[color]} h-1.5 rounded-full transition-all duration-500`}
+                style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function ProgressBar({ label, value, color, info }) {
+function BillingLink({ name, url, color, description }) {
   const colorClasses = {
-    blue: 'bg-blue-500',
-    purple: 'bg-purple-500',
     green: 'bg-green-500',
-    yellow: 'bg-yellow-500',
+    purple: 'bg-purple-500',
+    blue: 'bg-blue-500',
+    orange: 'bg-orange-500',
+    pink: 'bg-pink-500',
+    indigo: 'bg-indigo-500',
   };
 
   return (
-    <div>
-      <div className="flex justify-between mb-1">
-        <span className="text-sm font-medium text-gray-700">{label}</span>
-        <span className="text-sm text-gray-600">{Math.round(value)}%</span>
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-all"
+    >
+      <div className="flex items-center gap-3">
+        <div className={`w-2 h-2 rounded-full ${colorClasses[color]}`} />
+        <div>
+          <div className="text-sm font-medium text-gray-900 group-hover:text-blue-600">
+            {name}
+          </div>
+          <div className="text-xs text-gray-500">{description}</div>
+        </div>
       </div>
-      <div className="w-full bg-gray-200 rounded-full h-2">
-        <div
-          className={`${colorClasses[color]} h-2 rounded-full transition-all duration-500`}
-          style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
-        />
-      </div>
-      <div className="text-xs text-gray-500 mt-1">{info}</div>
-    </div>
+      <ExternalLink className="w-4 h-4 text-gray-400 group-hover:text-gray-600" />
+    </a>
   );
 }
 

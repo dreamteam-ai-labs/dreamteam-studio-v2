@@ -4,6 +4,7 @@ import { getProblems, getProblemsFilterOptions, getSolutionsByCluster, getSoluti
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
+import StudyModeModal from './StudyModeModal';
 import { useTableFeatures } from '../hooks/useTableFeatures';
 import { usePinnedEntities } from '../hooks/usePinnedEntities';
 import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
@@ -138,6 +139,9 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
   const [expandedProblems, setExpandedProblems] = useState(new Set());
   const [expandedClusters, setExpandedClusters] = useState(new Set());
   const [selectedItems, setSelectedItems] = useState(new Set());
+  const [studyModalOpen, setStudyModalOpen] = useState(false);
+  const [studyEntity, setStudyEntity] = useState(null);
+  const [studyEntityType, setStudyEntityType] = useState(null);
   
   // Load collapsed state for filters
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(() => {
@@ -394,6 +398,12 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
     });
   };
 
+  const openStudyMode = (entity, type) => {
+    setStudyEntity(entity);
+    setStudyEntityType(type);
+    setStudyModalOpen(true);
+  };
+
   if (isLoading) {
     return <div className="text-center py-4">Loading...</div>;
   }
@@ -646,23 +656,37 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
                         {new Date(problem.created_at).toLocaleDateString()}
                       </td>
                     )}
-                    <td className="px-3 py-3 text-center" style={{ width: '50px' }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePin(problem.id);
-                        }}
-                        className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
-                          isPinned(problem.id) 
-                            ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
-                            : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                        }`}
-                        title={isPinned(problem.id) ? 'Unpin' : 'Pin to top'}
-                      >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
-                        </svg>
-                      </button>
+                    <td className="px-3 py-3 text-center" style={{ width: '100px' }}>
+                      <div className="flex gap-1 justify-center">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openStudyMode(problem, 'problem');
+                          }}
+                          className="p-2 rounded-lg transition-all transform hover:scale-110 text-purple-500 hover:text-purple-700 hover:bg-purple-100"
+                          title="Study this problem"
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                          </svg>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePin(problem.id);
+                          }}
+                          className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
+                            isPinned(problem.id) 
+                              ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
+                              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                          }`}
+                          title={isPinned(problem.id) ? 'Unpin' : 'Pin to top'}
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+                          </svg>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   
@@ -842,23 +866,37 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
                         {new Date(problem.created_at).toLocaleDateString()}
                       </td>
                     )}
-                    <td className="px-3 py-3 text-center" style={{ width: '50px' }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePin(problem.id);
-                        }}
-                        className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
-                          isPinned(problem.id) 
-                            ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
-                            : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-                        }`}
-                        title={isPinned(problem.id) ? 'Unpin' : 'Pin to top'}
-                      >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
-                        </svg>
-                      </button>
+                    <td className="px-3 py-3 text-center" style={{ width: '100px' }}>
+                      <div className="flex gap-1 justify-center">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openStudyMode(problem, 'problem');
+                          }}
+                          className="p-2 rounded-lg transition-all transform hover:scale-110 text-purple-500 hover:text-purple-700 hover:bg-purple-100"
+                          title="Study this problem"
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                          </svg>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePin(problem.id);
+                          }}
+                          className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
+                            isPinned(problem.id) 
+                              ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
+                              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                          }`}
+                          title={isPinned(problem.id) ? 'Unpin' : 'Pin to top'}
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+                          </svg>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   
@@ -970,6 +1008,14 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
           </div>
         </div>
       )}
+      
+      {/* Study Mode Modal */}
+      <StudyModeModal 
+        isOpen={studyModalOpen}
+        onClose={() => setStudyModalOpen(false)}
+        initialEntity={studyEntity}
+        entityType={studyEntityType}
+      />
     </div>
   );
 }

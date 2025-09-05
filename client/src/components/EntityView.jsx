@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useLocation } from 'react-router-dom';
 import ProblemsTableMultiLevel from './ProblemsTableMultiLevel';
 import ClustersTable from './ClustersTable';
 import SolutionsTable from './SolutionsTable';
@@ -8,8 +9,15 @@ import GraphView from './GraphView';
 import { getProblemsFilterOptions, getClustersFilterOptions, getSolutionsFilterOptions } from '../services/api';
 
 function EntityView({ entityType }) {
+  const location = useLocation();
   const [viewMode, setViewMode] = useState('table');
-  const [dataMode, setDataMode] = useState('individual'); // 'individual' or 'clusters'
+  const [dataMode, setDataMode] = useState(() => {
+    // Check if we're navigating from Dashboard with cluster view
+    if (location.state?.viewMode === 'cluster' && entityType === 'problem') {
+      return 'clusters';
+    }
+    return 'individual';
+  }); // 'individual' or 'clusters'
   const [filteredData, setFilteredData] = useState([]); // Store filtered data from tables
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(() => {
     const saved = localStorage.getItem('entityview-filters-collapsed');

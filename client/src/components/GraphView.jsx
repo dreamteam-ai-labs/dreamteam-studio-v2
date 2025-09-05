@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import ReactFlow, {
-  MiniMap,
   Controls,
   Background,
   useNodesState,
@@ -19,6 +18,7 @@ import {
   getSolutionsByProblem,
   getProblemsBySolution 
 } from '../services/api';
+import StudyModeModal from './StudyModeModal';
 
 // Import React Flow styles
 import 'reactflow/dist/style.css';
@@ -28,7 +28,7 @@ import { Handle, Position } from 'reactflow';
 
 function CustomNode({ data }) {
   const getNodeStyle = () => {
-    const baseStyle = "px-4 py-3 shadow-lg rounded-lg border-2 cursor-pointer transition-all hover:shadow-xl";
+    const baseStyle = "px-4 py-3 shadow-lg rounded-lg border-2 cursor-pointer transition-all hover:shadow-xl relative";
     
     switch (data.type) {
       case 'problem':
@@ -59,9 +59,31 @@ function CustomNode({ data }) {
     }
   };
 
+  const handleEyeClick = (e) => {
+    e.stopPropagation(); // Prevent node click event
+    if (data.onViewDetails) {
+      data.onViewDetails();
+    }
+  };
+
   return (
     <div className={getNodeStyle()}>
       <Handle type="target" position={Position.Left} className="opacity-0" />
+      
+      {/* Eye icon in top right corner */}
+      {data.onViewDetails && (
+        <button
+          onClick={handleEyeClick}
+          className="absolute top-1 right-1 p-1 rounded hover:bg-white/50 transition-colors"
+          title="View details"
+        >
+          <svg className="w-4 h-4 opacity-60 hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+        </button>
+      )}
+      
       <div className="flex flex-col items-center max-w-xs">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xl">{getIcon()}</span>
@@ -93,10 +115,24 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
   const [localSearchTerm, setLocalSearchTerm] = useState('');
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [focusedNodeId, setFocusedNodeId] = useState(null);
+  const [entityListSelection, setEntityListSelection] = useState(null); // Track entity list selection separately
   const [solutionProblems, setSolutionProblems] = useState({}); // Cache for solution problems
   const [activeTab, setActiveTab] = useState('entities'); // 'entities' or 'details'
   const [navigationHistory, setNavigationHistory] = useState([]); // Track entity navigation path
+  const [isFullscreen, setIsFullscreen] = useState(false); // Track fullscreen mode
+  const [studyModalOpen, setStudyModalOpen] = useState(false); // Modal state
+  const [studyEntity, setStudyEntity] = useState(null); // Entity to show in modal
+  const [studyEntityType, setStudyEntityType] = useState(null); // Entity type for modal
   const { fitView } = useReactFlow(); // Get fitView function from React Flow
+  
+  // Re-center graph when entering/exiting fullscreen
+  useEffect(() => {
+    // Small delay to ensure layout has updated
+    const timer = setTimeout(() => {
+      fitView({ padding: 0.2, duration: 400 });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [isFullscreen, fitView]);
   const entityListRef = useRef(null);
   const entityItemRefs = useRef({});
   
@@ -488,6 +524,16 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
     return searchableItems.filter(item => item.searchText.includes(term));
   }, [searchableItems, searchTerm]);
 
+  // Function to handle viewing details without changing graph state
+  const handleViewDetails = useCallback((nodeId, entity) => {
+    // Determine entity type from the nodeId
+    const [entityType] = nodeId.split('-');
+    setStudyEntity(entity);
+    setStudyEntityType(entityType);
+    setStudyModalOpen(true);
+    // Don't change focusedNodeId or navigation history
+  }, []);
+
   // Build focused graph around selected entity
   useEffect(() => {
     if (!focusedNodeId) {
@@ -558,34 +604,49 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
           (initialEntityType === 'solutionCluster' ? 
             `${focusedItem.entity.solution_count || 0} solutions` : 
             `${focusedItem.entity.problem_count || 0} problems`) : 
-          ''}`
+          ''}`,
+        onViewDetails: () => handleViewDetails(focusedNodeId, focusedItem.entity)
       }
     };
     newNodes.push(centerNode);
     nodeMap.set(focusedNodeId, centerNode);
 
-    // Improved layout calculation
-    const calculateNodePositions = (nodeCount, baseRadius = 350) => {
+    // Improved layout calculation with better spacing
+    const calculateNodePositions = (nodeCount, baseRadius = 450) => {
       const positions = [];
-      const minSpacing = 150; // Minimum pixels between nodes for better spacing
+      const minSpacing = 200; // Increased minimum pixels between nodes to prevent overlap
       
       if (nodeCount === 0) {
         return positions;
       } else if (nodeCount === 1) {
-        // Single node - place to the right
+        // Single node - place to the right with more distance
         positions.push({ x: 400 + baseRadius, y: 300 });
       } else if (nodeCount === 2) {
-        // Two nodes - place left and right
-        positions.push({ x: 400 - baseRadius * 0.8, y: 300 });
-        positions.push({ x: 400 + baseRadius * 0.8, y: 300 });
+        // Two nodes - place left and right with wider spacing
+        positions.push({ x: 400 - baseRadius, y: 300 });
+        positions.push({ x: 400 + baseRadius, y: 300 });
       } else if (nodeCount === 3) {
-        // Three nodes - triangle formation
-        positions.push({ x: 400, y: 300 - baseRadius * 0.7 }); // Top
-        positions.push({ x: 400 - baseRadius * 0.6, y: 300 + baseRadius * 0.4 }); // Bottom left
-        positions.push({ x: 400 + baseRadius * 0.6, y: 300 + baseRadius * 0.4 }); // Bottom right
+        // Three nodes - triangle formation with more space
+        positions.push({ x: 400, y: 300 - baseRadius * 0.8 }); // Top
+        positions.push({ x: 400 - baseRadius * 0.7, y: 300 + baseRadius * 0.5 }); // Bottom left
+        positions.push({ x: 400 + baseRadius * 0.7, y: 300 + baseRadius * 0.5 }); // Bottom right
+      } else if (nodeCount <= 6) {
+        // 4-6 nodes - hexagon pattern with good spacing
+        const actualRadius = baseRadius * 1.2;
+        const angleStep = (2 * Math.PI) / nodeCount;
+        const startAngle = -Math.PI / 2; // Start at top
+        
+        for (let i = 0; i < nodeCount; i++) {
+          const angle = startAngle + i * angleStep;
+          positions.push({
+            x: 400 + actualRadius * Math.cos(angle),
+            y: 300 + actualRadius * Math.sin(angle)
+          });
+        }
       } else {
-        // Multiple nodes - distribute in circle with dynamic radius
-        const actualRadius = Math.max(baseRadius, (nodeCount * minSpacing) / (2 * Math.PI));
+        // Many nodes - distribute in circle with dynamic radius ensuring minimum spacing
+        const requiredCircumference = nodeCount * minSpacing;
+        const actualRadius = Math.max(baseRadius, requiredCircumference / (2 * Math.PI));
         const angleStep = (2 * Math.PI) / nodeCount;
         const startAngle = -Math.PI / 2; // Start at top
         
@@ -617,8 +678,10 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
             data: {
               type: 'cluster',
               label: cluster.cluster_label || cluster.label,
-              subtitle: `${cluster.problem_count || 0} problems`
+              subtitle: `${cluster.problem_count || 0} problems`,
+              onViewDetails: () => handleViewDetails(`cluster-${problem.cluster_id}`, cluster)
             },
+            entity: cluster,
             edgeStyle: { stroke: '#9333ea', strokeWidth: 2 },
             edgeDirection: 'from-center' // problem -> cluster
           });
@@ -659,15 +722,17 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
           data: {
             type: 'solution',
             label: solution.title,
-            subtitle: `Viability: ${solution.overall_viability}%`
+            subtitle: `Viability: ${solution.overall_viability}%`,
+            onViewDetails: () => handleViewDetails(`solution-${solution.id}`, solution)
           },
+          entity: solution,
           edgeStyle: { stroke: '#10b981', strokeWidth: 2 },
           edgeDirection: 'from-center' // problem -> solution
         });
       });
 
       // Calculate positions for all related nodes with proper spacing
-      const positions = calculateNodePositions(relatedNodes.length, 350);
+      const positions = calculateNodePositions(relatedNodes.length);
       
       // Add nodes with calculated positions
       relatedNodes.forEach((node, index) => {
@@ -722,10 +787,10 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
         : solutions?.filter(s => s.source_cluster_id === clusterId); // Get solutions generated from this problem cluster
       
       // Calculate positions with better spacing
-      const problemPositions = calculateNodePositions(clusterProblems.length, 350);
+      const problemPositions = calculateNodePositions(clusterProblems.length);
       const solutionPositions = clusterSolutions.length <= 2 
-        ? [{ x: 750, y: 250 }, { x: 750, y: 350 }].slice(0, clusterSolutions.length)
-        : calculateNodePositions(clusterSolutions.length, 300);
+        ? [{ x: 900, y: 250 }, { x: 900, y: 350 }].slice(0, clusterSolutions.length)
+        : calculateNodePositions(clusterSolutions.length, 400);
       
       // Add problems
       clusterProblems.forEach((problem, idx) => {
@@ -796,8 +861,10 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
             data: {
               type: 'cluster',
               label: cluster.cluster_label || cluster.label || solution.source_cluster_label,
-              subtitle: `${cluster.problem_count || 0} problems`
+              subtitle: `${cluster.problem_count || 0} problems`,
+              onViewDetails: () => handleViewDetails(`cluster-${solution.source_cluster_id}`, cluster)
             },
+            entity: cluster,
             edgeStyle: { stroke: '#9333ea', strokeWidth: 2 },
             edgeDirection: 'to-center' // cluster -> solution
           });
@@ -814,8 +881,10 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
             data: {
               type: 'problem',
               label: problem.title,
-              subtitle: problem.impact ? `Impact: ${problem.impact}` : ''
+              subtitle: problem.impact ? `Impact: ${problem.impact}` : '',
+              onViewDetails: () => handleViewDetails(`problem-${problem.id}`, problem)
             },
+            entity: problem,
             edgeStyle: { stroke: '#3b82f6', strokeWidth: 1, strokeDasharray: '5,5' },
             edgeDirection: 'to-center' // problem -> solution
           });
@@ -831,15 +900,17 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
           data: {
             type: 'project',
             label: project.name || project.solution_title || 'Project',
-            subtitle: project.linear_project_id ? 'Active' : 'Planned'
+            subtitle: project.linear_project_id ? 'Active' : 'Planned',
+            onViewDetails: () => handleViewDetails(`project-${project.id}`, project)
           },
+          entity: project,
           edgeStyle: { stroke: '#eab308', strokeWidth: 2 },
           edgeDirection: 'from-center' // solution -> project
         });
       }
 
       // Calculate positions for all related nodes
-      const positions = calculateNodePositions(relatedNodes.length, 350);
+      const positions = calculateNodePositions(relatedNodes.length);
       
       // Add nodes with calculated positions
       relatedNodes.forEach((node, index) => {
@@ -894,8 +965,10 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
             data: {
               type: 'solution',
               label: solution.title,
-              subtitle: `Viability: ${solution.overall_viability}%`
+              subtitle: `Viability: ${solution.overall_viability}%`,
+              onViewDetails: () => handleViewDetails(`solution-${solution.id}`, solution)
             },
+            entity: solution,
             edgeStyle: { stroke: '#eab308', strokeWidth: 2 },
             edgeDirection: 'to-center' // solution -> project
           });
@@ -910,8 +983,10 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
                 data: {
                   type: 'cluster',
                   label: cluster.cluster_label || cluster.label || solution.source_cluster_label,
-                  subtitle: `${cluster.problem_count || 0} problems`
+                  subtitle: `${cluster.problem_count || 0} problems`,
+                  onViewDetails: () => handleViewDetails(`cluster-${solution.source_cluster_id}`, cluster)
                 },
+                entity: cluster,
                 edgeStyle: { stroke: '#9333ea', strokeWidth: 1, strokeDasharray: '5,5' },
                 edgeDirection: 'indirect' // cluster related but not directly connected to project
               });
@@ -928,8 +1003,10 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
                 data: {
                   type: 'problem',
                   label: problem.title,
-                  subtitle: problem.impact ? `Impact: ${problem.impact}` : ''
+                  subtitle: problem.impact ? `Impact: ${problem.impact}` : '',
+                  onViewDetails: () => handleViewDetails(`problem-${problem.id}`, problem)
                 },
+                entity: problem,
                 edgeStyle: { stroke: '#3b82f6', strokeWidth: 1, strokeDasharray: '5,5' },
                 edgeDirection: 'indirect' // problems related but not directly connected to project
               });
@@ -939,7 +1016,7 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
       }
 
       // Calculate positions for all related nodes
-      const positions = calculateNodePositions(relatedNodes.length, 350);
+      const positions = calculateNodePositions(relatedNodes.length);
       
       // Add nodes with calculated positions
       relatedNodes.forEach((node, index) => {
@@ -1014,7 +1091,7 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
         });
       }, 100);
     }
-  }, [focusedNodeId, problems, clusters, solutions, projects, searchableItems, solutionProblems, fitView]);
+  }, [focusedNodeId, problems, clusters, solutions, projects, searchableItems, solutionProblems, fitView, handleViewDetails]);
 
   // Create a complete list of all items for node clicks (unfiltered)
   const allItems = useMemo(() => {
@@ -1093,7 +1170,8 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
         // Refocus the graph on the clicked node
         setFocusedNodeId(node.id);
         setSelectedEntity(entity);
-        setActiveTab('details'); // Switch to details tab when clicking a node
+        // Don't automatically switch tabs when clicking nodes in graph
+        // This preserves the entity list selection for when user returns
         
         // Update navigation history
         setNavigationHistory(prev => {
@@ -1118,22 +1196,20 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
     }
   }, [problems, clusters, solutions, projects, focusedNodeId, fitView]);
 
-  const handleItemSelect = (item, isFromBreadcrumb = false) => {
+  const handleItemSelect = (item, isFromNavigation = false) => {
     setFocusedNodeId(item.id);
     setSelectedEntity(item.entity);
+    setEntityListSelection(item.id); // Track entity list selection
     setActiveTab('details'); // Switch to details tab when selecting an entity
     
     // Update navigation history
-    if (!isFromBreadcrumb) {
-      // Add to history (max 10 items to prevent infinite growth)
-      setNavigationHistory(prev => {
-        const newHistory = [...prev, {
-          id: item.id,
-          title: item.title || item.entity?.title || item.entity?.name || item.entity?.cluster_label || 'Unknown',
-          type: item.type
-        }].slice(-10);
-        return newHistory;
-      });
+    if (!isFromNavigation) {
+      // Clear history and start fresh when selecting from entity list
+      setNavigationHistory([{
+        id: item.id,
+        title: item.title || item.entity?.title || item.entity?.name || item.entity?.cluster_label || 'Unknown',
+        type: item.type
+      }]);
     }
     
     // Auto-fit view after a short delay to allow nodes to be positioned
@@ -1149,16 +1225,16 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
   
   // Scroll to selected entity when switching to entities tab
   useEffect(() => {
-    if (activeTab === 'entities' && focusedNodeId && entityItemRefs.current[focusedNodeId]) {
+    if (activeTab === 'entities' && entityListSelection && entityItemRefs.current[entityListSelection]) {
       // Small delay to ensure the tab content is rendered
       setTimeout(() => {
-        entityItemRefs.current[focusedNodeId]?.scrollIntoView({
+        entityItemRefs.current[entityListSelection]?.scrollIntoView({
           behavior: 'smooth',
           block: 'center'
         });
       }, 100);
     }
-  }, [activeTab, focusedNodeId]);
+  }, [activeTab, entityListSelection]);
 
   // Handle breadcrumb navigation
   const navigateToBreadcrumb = useCallback((index) => {
@@ -1294,7 +1370,7 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
   };
 
   return (
-    <div className="flex h-[800px] gap-4">
+    <div className={`flex gap-4 ${isFullscreen ? 'fixed inset-0 z-50 bg-gray-100 p-4' : 'h-[800px]'}`}>
       {/* Left Panel - Search, Selection and Details */}
       <div className="w-96 flex flex-col gap-4">
         {/* Entity Explorer with Tabs */}
@@ -1325,68 +1401,6 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
             </div>
           </div>
           
-          {/* Navigation Breadcrumb */}
-          {navigationHistory.length > 0 && (
-            <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-1 overflow-x-auto">
-              <span className="text-xs text-gray-500 mr-2">Path:</span>
-              {navigationHistory.map((item, index) => {
-                // Use same colors as graph nodes
-                const getItemColors = () => {
-                  if (index === navigationHistory.length - 1) {
-                    // Current item - stronger colors (matching graph nodes)
-                    switch(item.type) {
-                      case 'problem': return 'bg-blue-100 text-blue-800 border-blue-300';
-                      case 'cluster': return 'bg-purple-100 text-purple-800 border-purple-300';
-                      case 'solution': return 'bg-green-100 text-green-800 border-green-300';
-                      case 'project': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-                      default: return 'bg-gray-100 text-gray-800 border-gray-300';
-                    }
-                  } else {
-                    // Previous items - lighter colors on hover (matching graph nodes)
-                    switch(item.type) {
-                      case 'problem': return 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200';
-                      case 'cluster': return 'bg-purple-50 text-purple-700 hover:bg-purple-100 border-purple-200';
-                      case 'solution': return 'bg-green-50 text-green-700 hover:bg-green-100 border-green-200';
-                      case 'project': return 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border-yellow-200';
-                      default: return 'bg-gray-50 text-gray-700 hover:bg-gray-100 border-gray-200';
-                    }
-                  }
-                };
-                
-                return (
-                  <React.Fragment key={index}>
-                    {index > 0 && <span className="text-gray-400 mx-1">→</span>}
-                    <button
-                      onClick={() => navigateToBreadcrumb(index)}
-                      className={`text-xs px-2 py-1 rounded border transition-all ${getItemColors()} ${
-                        index === navigationHistory.length - 1 ? 'font-medium' : ''
-                      }`}
-                      title={item.title}
-                    >
-                      <span className="mr-1">
-                        {item.type === 'problem' && '⚠️'}
-                        {item.type === 'cluster' && '📊'}
-                        {item.type === 'solution' && '💡'}
-                        {item.type === 'project' && '🚀'}
-                      </span>
-                      <span className="max-w-[100px] truncate inline-block align-bottom">
-                        {item.title.length > 20 ? item.title.substring(0, 20) + '...' : item.title}
-                      </span>
-                    </button>
-                  </React.Fragment>
-                );
-              })}
-              {navigationHistory.length > 0 && (
-                <button
-                  onClick={() => setNavigationHistory([])}
-                  className="ml-2 text-xs text-gray-500 hover:text-gray-700 px-2 py-1"
-                  title="Clear navigation history"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          )}
           
           {/* Tab Content */}
           <div className="flex-1 overflow-hidden p-4">
@@ -1414,7 +1428,7 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
                 ref={el => entityItemRefs.current[item.id] = el}
                 onClick={() => handleItemSelect(item)}
                 className={`p-2 rounded cursor-pointer transition-all ${
-                  focusedNodeId === item.id
+                  entityListSelection === item.id
                     ? 'bg-primary-100 border-primary-500 border'
                     : 'hover:bg-gray-50 border border-transparent'
                 }`}
@@ -1807,37 +1821,135 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
       </div>
 
       {/* Right Panel - Graph */}
-      <div className="flex-1 bg-white rounded-lg shadow">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onNodeClick={onNodeClick}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.2 }}
-          attributionPosition="bottom-left"
-        >
+      <div className="flex-1 bg-white rounded-lg shadow flex flex-col overflow-hidden">
+        {/* Fullscreen Toggle Button */}
+        <div className="px-4 py-2 border-b border-gray-200 flex justify-end">
+          <button
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            className="text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 px-3 py-1 rounded transition-all flex items-center gap-2"
+            title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+          >
+            {isFullscreen ? '✕ Exit Fullscreen' : '⛶ Fullscreen'}
+          </button>
+        </div>
+        
+        {/* Horizontal Breadcrumb Navigation */}
+        {navigationHistory.length > 0 && (
+          <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+            <div className="flex items-center gap-2 max-w-full">
+              <span className="text-xs font-medium text-gray-500 flex-shrink-0">Path:</span>
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200 min-w-0" 
+                   style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0 }}>
+                {navigationHistory.map((item, index) => {
+                  const isLast = index === navigationHistory.length - 1;
+                  
+                  // Get colors for the breadcrumb item
+                  const getItemColors = () => {
+                    if (isLast) {
+                      switch(item.type) {
+                        case 'problem': return 'bg-blue-100 text-blue-800 border-blue-300';
+                        case 'cluster': return 'bg-purple-100 text-purple-800 border-purple-300';
+                        case 'solution': return 'bg-green-100 text-green-800 border-green-300';
+                        case 'project': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+                        default: return 'bg-gray-100 text-gray-800 border-gray-300';
+                      }
+                    } else {
+                      switch(item.type) {
+                        case 'problem': return 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100';
+                        case 'cluster': return 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100';
+                        case 'solution': return 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100';
+                        case 'project': return 'bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100';
+                        default: return 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100';
+                      }
+                    }
+                  };
+                  
+                  const getIcon = () => {
+                    switch(item.type) {
+                      case 'problem': return '⚠️';
+                      case 'cluster': return '📊';
+                      case 'solution': return '💡';
+                      case 'project': return '🚀';
+                      default: return '📌';
+                    }
+                  };
+                  
+                  return (
+                    <React.Fragment key={index}>
+                      {index > 0 && (
+                        <span className="text-gray-400">→</span>
+                      )}
+                      <button
+                        onClick={() => navigateToBreadcrumb(index)}
+                        className={`
+                          flex items-center gap-1 px-2 py-1 rounded border text-xs
+                          transition-all whitespace-nowrap
+                          ${getItemColors()}
+                          ${isLast ? 'font-medium cursor-default' : 'cursor-pointer'}
+                        `}
+                        title={item.title}
+                      >
+                        <span>{getIcon()}</span>
+                        <span className="max-w-[150px] truncate">
+                          {item.title}
+                        </span>
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+              <button
+                onClick={() => {
+                  // Get the first breadcrumb item (original selection)
+                  const firstItem = navigationHistory[0];
+                  
+                  // Switch to entities tab
+                  setActiveTab('entities');
+                  
+                  // Set the entity list selection to the original entity
+                  if (firstItem) {
+                    setEntityListSelection(firstItem.id);
+                    setFocusedNodeId(firstItem.id);
+                  }
+                  
+                  // Clear the navigation history
+                  setNavigationHistory([]);
+                }}
+                className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 hover:bg-gray-100 rounded flex-shrink-0"
+                title="Clear navigation history and return to entity list"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {/* Graph */}
+        <div className="flex-1 overflow-hidden min-h-0">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onNodeClick={onNodeClick}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            proOptions={{ hideAttribution: true }}
+          >
           <Background variant="dots" gap={12} size={1} />
           <Controls />
-          <MiniMap 
-            nodeColor={(node) => {
-              switch (node.data?.type) {
-                case 'problem': return '#3b82f6';
-                case 'cluster': return '#9333ea';
-                case 'solution': return '#10b981';
-                case 'project': return '#eab308';
-                default: return '#6b7280';
-              }
-            }}
-            style={{
-              backgroundColor: '#f3f4f6',
-              border: '1px solid #d1d5db',
-            }}
-          />
-        </ReactFlow>
+          </ReactFlow>
+        </div>
       </div>
+      
+      {/* Study Mode Modal */}
+      <StudyModeModal 
+        isOpen={studyModalOpen}
+        onClose={() => setStudyModalOpen(false)}
+        initialEntity={studyEntity}
+        entityType={studyEntityType}
+      />
     </div>
   );
 }
