@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, memo, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect, useCallback, memo, useMemo, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getProjects, getSolutions, getProblemsBySolution, getProblemsByCluster } from '../services/api';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
 import { useTableFeatures } from '../hooks/useTableFeatures';
 import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
+import { formatDateTime } from '../utils/dateUtils';
 import '../styles/tables.css';
 
 // Use centralized column definitions
@@ -12,7 +13,7 @@ const ALL_COLUMNS = TAB_COLUMNS.projects;
 const DEFAULT_COLUMNS = DEFAULT_VISIBLE_COLUMNS.projects;
 
 // Project row component with full journey view
-function ProjectRow({ project, solution, visibleColumns }) {
+function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Fetch problems directly linked to solution
@@ -31,7 +32,7 @@ function ProjectRow({ project, solution, visibleColumns }) {
 
   return (
     <>
-      <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
+      <tr className={`hover:bg-gray-50 cursor-pointer ${newProjectIds.has(project.id) ? 'flash-new new-item' : ''}`} onClick={() => setIsExpanded(!isExpanded)}>
         {visibleColumns.includes('name') && (
           <td className="px-4 py-3" style={{ minWidth: '350px' }}>
             <div className="flex items-start gap-2">
@@ -145,8 +146,8 @@ function ProjectRow({ project, solution, visibleColumns }) {
           </td>
         )}
         {visibleColumns.includes('created') && (
-          <td className="px-4 py-3 text-sm text-gray-500 text-center" style={{ width: '120px' }}>
-            {new Date(project.created_at).toLocaleDateString()}
+          <td className="px-4 py-3 text-sm text-gray-500 text-center" style={{ width: '180px' }}>
+            {formatDateTime(project.created_at)}
           </td>
         )}
       </tr>
@@ -210,7 +211,7 @@ function ProjectRow({ project, solution, visibleColumns }) {
                           {project.created_at && (
                             <div>
                               <span className="text-gray-500">Created:</span>
-                              <span className="ml-2 text-gray-900">{new Date(project.created_at).toLocaleDateString()}</span>
+                              <span className="ml-2 text-gray-900">{formatDateTime(project.created_at)}</span>
                             </div>
                           )}
                         </div>
@@ -361,6 +362,13 @@ function ProjectRow({ project, solution, visibleColumns }) {
 }
 
 function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFiltered }) {
+  const queryClient = useQueryClient();
+  const [newProjectIds, setNewProjectIds] = useState(new Set());
+  const prevDataRef = useRef([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [sortBy, setSortBy] = useState(null);
+  const [sortOrder, setSortOrder] = useState('asc');
+  
   // Load saved column preferences or use defaults
   const [visibleColumns, setVisibleColumns] = useState(() => {
     const saved = localStorage.getItem('projects-visible-columns');
@@ -385,17 +393,54 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
   } = useTableFeatures(visibleColumns, useMemo(() => getInitialColumnWidths('projects'), []));
 
   // Fetch projects
-  const { data: projects, isLoading: projectsLoading } = useQuery({
+  const { data: projects, isLoading: projectsLoading, refetch: refetchProjects } = useQuery({
     queryKey: ['projects'],
     queryFn: getProjects,
     refetchInterval: 30000, // Refresh every 30 seconds
   });
 
   // Fetch all solutions to get more details
-  const { data: solutions } = useQuery({
+  const { data: solutions, refetch: refetchSolutions } = useQuery({
     queryKey: ['all-solutions'],
     queryFn: () => getSolutions({}),
   });
+
+  // Track new projects after refresh
+  useEffect(() => {
+    if (projects && prevDataRef.current.length > 0) {
+      const prevIds = new Set(prevDataRef.current.map(p => p.id));
+      const newIds = new Set();
+      
+      projects.forEach(project => {
+        if (!prevIds.has(project.id)) {
+          newIds.add(project.id);
+        }
+      });
+      
+      if (newIds.size > 0) {
+        setNewProjectIds(newIds);
+        // Clear new items after animation
+        setTimeout(() => {
+          setNewProjectIds(new Set());
+        }, 3000);
+      }
+    }
+    prevDataRef.current = projects || [];
+  }, [projects]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        refetchProjects(),
+        refetchSolutions(),
+        queryClient.invalidateQueries({ queryKey: ['project-solution-problems'] }),
+        queryClient.invalidateQueries({ queryKey: ['project-cluster-problems'] })
+      ]);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
 
   const handleColumnChange = useCallback((newColumns) => {
     // Ensure name column is always visible
@@ -406,6 +451,15 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
     // Update top scroll width after columns change
     setTimeout(updateTopScrollWidth, 0);
   }, [updateTopScrollWidth]);
+
+  const handleSort = useCallback((columnKey) => {
+    if (sortBy === columnKey) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(columnKey);
+      setSortOrder('asc');
+    }
+  }, [sortBy, sortOrder]);
 
   // Apply external filters if provided
   const filteredProjects = useMemo(() => {
@@ -484,6 +538,58 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
     return filtered;
   }, [projects, solutions, externalFilters]);
 
+  // Sort projects
+  const sortedProjects = useMemo(() => {
+    if (!filteredProjects || !sortBy) return filteredProjects;
+    
+    const sorted = [...filteredProjects].sort((a, b) => {
+      let aVal, bVal;
+      
+      // Get solution details for viability sorting
+      const aSolution = solutions?.find(s => s.id === a.solution_id);
+      const bSolution = solutions?.find(s => s.id === b.solution_id);
+      
+      switch (sortBy) {
+        case 'name':
+          aVal = a.name || a.solution_title || '';
+          bVal = b.name || b.solution_title || '';
+          break;
+        case 'github':
+          aVal = a.github_repo_url || '';
+          bVal = b.github_repo_url || '';
+          break;
+        case 'linear':
+          aVal = a.linear_project_id || '';
+          bVal = b.linear_project_id || '';
+          break;
+        case 'viability':
+          aVal = aSolution?.overall_viability || 0;
+          bVal = bSolution?.overall_viability || 0;
+          break;
+        case 'status':
+          aVal = a.status || 'active';
+          bVal = b.status || 'active';
+          break;
+        case 'created':
+          aVal = new Date(a.created_at).getTime();
+          bVal = new Date(b.created_at).getTime();
+          break;
+        default:
+          return 0;
+      }
+      
+      // Compare values
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+      } else {
+        const result = String(aVal).localeCompare(String(bVal));
+        return sortOrder === 'asc' ? result : -result;
+      }
+    });
+    
+    return sorted;
+  }, [filteredProjects, solutions, sortBy, sortOrder]);
+
   // Pass filtered data back to parent
   useEffect(() => {
     if (onDataFiltered) {
@@ -496,7 +602,7 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
   }
 
   // Get solution details for each project
-  const projectsWithDetails = filteredProjects?.map(project => {
+  const projectsWithDetails = sortedProjects?.map(project => {
     const solution = solutions?.find(s => s.id === project.solution_id);
     return {
       ...project,
@@ -514,11 +620,28 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
             <h2 className="text-lg font-semibold text-gray-800">
               Products Launched ({projects?.length || 0})
             </h2>
-            <ColumnSelector 
-              columns={ALL_COLUMNS}
-              selectedColumns={visibleColumns}
-              onColumnChange={handleColumnChange}
-            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                title="Refresh projects"
+              >
+                <svg 
+                  className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+              <ColumnSelector 
+                columns={ALL_COLUMNS}
+                selectedColumns={visibleColumns}
+                onColumnChange={handleColumnChange}
+              />
+            </div>
           </div>
         </div>
         {/* Top scrollbar */}
@@ -543,9 +666,9 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
                   <TableHeader
                     key={column.key}
                     column={column}
-                    sortBy={null}
-                    sortOrder={null}
-                    onSort={() => {}}
+                    sortBy={sortBy}
+                    sortOrder={sortOrder}
+                    onSort={handleSort}
                     columnWidth={columnWidths[column.key]}
                     onMouseDown={handleMouseDown}
                   />
@@ -570,6 +693,7 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
                     project={project} 
                     solution={project.solution_details}
                     visibleColumns={visibleColumns}
+                    newProjectIds={newProjectIds}
                   />
                 ))
               )}

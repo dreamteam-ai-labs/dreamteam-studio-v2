@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getProblems, getSolutions, getSolutionsByProblem, getSolutionsByCluster, getProblemsBySolution, getProblemsByCluster } from '../services/api';
+import { formatCurrency, formatLargeCurrency } from '../utils/numberUtils';
 
 function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
   const [currentEntity, setCurrentEntity] = useState(initialEntity);
@@ -229,19 +230,19 @@ function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
             {currentEntity.market_size_estimate && (
               <div className="bg-white p-4 rounded-lg border border-gray-200">
                 <div className="text-sm text-gray-500 mb-1">Market Size</div>
-                <div className="font-medium">${(currentEntity.market_size_estimate / 1000000).toFixed(1)}M</div>
+                <div className="font-medium">{formatLargeCurrency(currentEntity.market_size_estimate).replace('£', '$')}</div>
               </div>
             )}
             {currentEntity.ltv_estimate && (
               <div className="bg-white p-4 rounded-lg border border-gray-200">
                 <div className="text-sm text-gray-500 mb-1">LTV</div>
-                <div className="font-medium">£{currentEntity.ltv_estimate}</div>
+                <div className="font-medium">{formatCurrency(currentEntity.ltv_estimate)}</div>
               </div>
             )}
             {currentEntity.cac_estimate && (
               <div className="bg-white p-4 rounded-lg border border-gray-200">
                 <div className="text-sm text-gray-500 mb-1">CAC</div>
-                <div className="font-medium">£{currentEntity.cac_estimate}</div>
+                <div className="font-medium">{formatCurrency(currentEntity.cac_estimate)}</div>
               </div>
             )}
             {currentEntity.estimated_dev_weeks && (
@@ -362,6 +363,20 @@ function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
                       <div className="flex-1">
                         <h5 className="font-medium text-gray-900 mb-2">{problem.title}</h5>
                         <p className="text-sm text-gray-600 line-clamp-2">{problem.description}</p>
+                        {problem.source_url && (
+                          <a 
+                            href={problem.source_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                            View Source
+                          </a>
+                        )}
                       </div>
                       <div className="ml-4 text-right">
                         {problem.impact && (
@@ -410,6 +425,20 @@ function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
                         <div className="flex-1">
                           <h5 className="font-medium text-gray-900 mb-2">{problem.title}</h5>
                           <p className="text-sm text-gray-600 line-clamp-2">{problem.description}</p>
+                          {problem.source_url && (
+                            <a 
+                              href={problem.source_url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                              View Source
+                            </a>
+                          )}
                         </div>
                         <div className="ml-4 text-right">
                           {problem.impact && (

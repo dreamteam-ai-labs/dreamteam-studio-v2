@@ -1,6 +1,8 @@
-import { useState, useCallback, memo, useEffect, useMemo } from 'react';
+import { useState, useCallback, memo, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getSolutions, getProblemsBySolution, getProblemsByCluster, getSolutionsFilterOptions, getBestSolutionCandidate } from '../services/api';
+import { formatDateTime, isNewItem } from '../utils/dateUtils';
+import { formatLargeCurrency, formatPercentage } from '../utils/numberUtils';
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
@@ -142,7 +144,7 @@ const FiltersSection = memo(function FiltersSection({
 });
 
 // Solution row component for expandable functionality
-function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTogglePin, isSelected, onToggleSelect, onStudy }) {
+function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTogglePin, isSelected, onToggleSelect, onStudy, isNew, isFlashing }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Get problems directly linked to solution
@@ -163,7 +165,7 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
 
   return (
     <>
-      <tr className={`hover:bg-gray-50 ${isPinned ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}>
+      <tr className={`hover:bg-gray-50 ${isPinned ? 'bg-blue-50 border-l-4 border-blue-500' : ''} ${isFlashing ? 'flash-new' : ''} ${isNew ? 'new-item' : ''}`}>
         <td className="px-3 py-4 text-center" style={{ width: '40px' }}>
           <input
             type="checkbox"
@@ -248,7 +250,7 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
         {visibleColumns.includes('ltv_cac') && (
           <td className="px-6 py-4 text-sm text-gray-900 text-center cursor-pointer" style={{ width: '140px' }} onClick={() => setIsExpanded(!isExpanded)}>
             {solution.ltv_estimate && solution.cac_estimate ? 
-              `£${(solution.ltv_estimate / 1000).toFixed(0)}k / £${(solution.cac_estimate / 1000).toFixed(0)}k` : 
+              `${formatLargeCurrency(solution.ltv_estimate, 0)} / ${formatLargeCurrency(solution.cac_estimate, 0)}` : 
               'N/A'
             }
           </td>
@@ -257,7 +259,7 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
         {visibleColumns.includes('revenue') && (
           <td className="px-6 py-4 text-sm text-gray-900 text-center cursor-pointer" style={{ width: '100px' }} onClick={() => setIsExpanded(!isExpanded)}>
             {solution.recurring_revenue_potential ? 
-              `£${(solution.recurring_revenue_potential / 1000000).toFixed(1)}M` : 
+              formatLargeCurrency(solution.recurring_revenue_potential) : 
               'N/A'
             }
           </td>
@@ -300,7 +302,7 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
         
         {visibleColumns.includes('created_at') && (
           <td className="px-6 py-4 text-sm text-gray-900 text-center cursor-pointer" style={{ width: '120px' }} onClick={() => setIsExpanded(!isExpanded)}>
-            {solution.created_at ? new Date(solution.created_at).toLocaleDateString() : 'N/A'}
+            {formatDateTime(solution.created_at)}
           </td>
         )}
         <td className="px-3 py-4 text-center" style={{ width: '100px' }}>
@@ -363,7 +365,7 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
                         <span className="text-gray-500">Revenue Potential:</span>
                         <p className="text-gray-700 mt-1">
                           {solution.recurring_revenue_potential ? 
-                            `£${(solution.recurring_revenue_potential / 1000000).toFixed(1)}M` : 
+                            formatLargeCurrency(solution.recurring_revenue_potential) : 
                             'Not specified'
                           }
                         </p>
@@ -532,6 +534,10 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
   const [studyModalOpen, setStudyModalOpen] = useState(false);
   const [studyEntity, setStudyEntity] = useState(null);
   const [studyEntityType, setStudyEntityType] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [newItemIds, setNewItemIds] = useState(new Set());
+  const [flashItemIds, setFlashItemIds] = useState(new Set());
+  const previousDataRef = useRef(null);
   
   // Selection handlers
   const handleSelectAll = (solutions) => {
@@ -593,16 +599,55 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
     staleTime: 1000 * 60 * 10, // Cache for 10 minutes
   });
 
-  const { data: allSolutions, isLoading } = useQuery({
+  const { data: allSolutions, isLoading, refetch: refetchSolutions } = useQuery({
     queryKey: ['solutions', apiFilters],
     queryFn: () => getSolutions(apiFilters),
     refetchOnWindowFocus: false,
     refetchOnMount: false,
     keepPreviousData: true,
   });
+
+  // Handle refresh
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // Store current data before refresh
+      previousDataRef.current = allSolutions ? new Set(allSolutions.map(s => s.id)) : new Set();
+      await Promise.all([
+        refetchSolutions(),
+        refetchBestCandidate()
+      ]);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
+
+  // Detect new items after data changes
+  useEffect(() => {
+    if (allSolutions && previousDataRef.current) {
+      const newIds = new Set();
+      allSolutions.forEach(solution => {
+        // Item is new if it wasn't in previous data OR was created in last 10 seconds
+        if (!previousDataRef.current.has(solution.id) || isNewItem(solution.created_at)) {
+          newIds.add(solution.id);
+        }
+      });
+      
+      if (newIds.size > 0) {
+        setNewItemIds(newIds);  // Keep persistent for green border
+        setFlashItemIds(newIds); // For flash animation
+        // Clear only the flash animation after 1.5 seconds
+        setTimeout(() => setFlashItemIds(new Set()), 1500);
+      } else {
+        // Clear new items on refresh if no new items found
+        setNewItemIds(new Set());
+        setFlashItemIds(new Set());
+      }
+    }
+  }, [allSolutions]);
   
   // Fetch the best solution candidate
-  const { data: bestCandidate } = useQuery({
+  const { data: bestCandidate, refetch: refetchBestCandidate } = useQuery({
     queryKey: ['best-solution-candidate'],
     queryFn: getBestSolutionCandidate,
     staleTime: 1000 * 60 * 5, // Cache for 5 minutes
@@ -795,6 +840,21 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
               )}
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-2 px-3 py-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
+                title="Refresh data"
+              >
+                <svg 
+                  className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
               {bestCandidate && !isPinned(bestCandidate.id) && (
                 <button
                   onClick={() => togglePin(bestCandidate.id)}
@@ -879,6 +939,8 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                     isSelected={selectedItems.has(solution.id)}
                     onToggleSelect={() => handleSelectItem(solution.id)}
                     onStudy={openStudyMode}
+                    isNew={newItemIds.has(solution.id)}
+                    isFlashing={flashItemIds.has(solution.id)}
                   />
                 ))}
                 {/* Divider between pinned and unpinned */}
@@ -901,6 +963,8 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                     isSelected={selectedItems.has(solution.id)}
                     onToggleSelect={() => handleSelectItem(solution.id)}
                     onStudy={openStudyMode}
+                    isNew={newItemIds.has(solution.id)}
+                    isFlashing={flashItemIds.has(solution.id)}
                   />
                 ))}
               </>

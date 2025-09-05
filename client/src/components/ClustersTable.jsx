@@ -1,7 +1,8 @@
-import React, { useState, useCallback, memo, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, memo, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getClusters, getProblemsByCluster, getSolutionsByCluster, getClustersFilterOptions } from '../services/api';
 import api from '../services/api';
+import { formatDateTime, isNewItem } from '../utils/dateUtils';
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
@@ -122,7 +123,7 @@ const FiltersSection = memo(function FiltersSection({
 });
 
 // Cluster row component for expandable functionality
-function ClusterRow({ cluster, visibleColumns, entityType = 'problem' }) {
+function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, isFlashing }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [problemSort, setProblemSort] = useState({ field: 'impact', order: 'desc' });
   const [solutionSort, setSolutionSort] = useState({ field: 'viability', order: 'desc' });
@@ -207,7 +208,7 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem' }) {
 
   return (
     <>
-      <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
+      <tr className={`hover:bg-gray-50 cursor-pointer ${isFlashing ? 'flash-new' : ''} ${isNew ? 'new-item' : ''}`} onClick={() => setIsExpanded(!isExpanded)}>
         <td className="px-6 py-4" style={{ minWidth: '350px' }}>
           <div className="flex items-center gap-2">
             <span className="text-gray-400 flex-shrink-0">
@@ -265,7 +266,7 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem' }) {
         
         {visibleColumns.includes('created_at') && (
           <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '120px' }}>
-            {cluster.created_at ? new Date(cluster.created_at).toLocaleDateString() : 'N/A'}
+            {formatDateTime(cluster.created_at)}
           </td>
         )}
       </tr>
@@ -430,6 +431,10 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem' }) {
 function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFiltered, entityType = 'problem' }) {
   // Use external filters if provided, otherwise use local state
   const [localSearchTerm, setLocalSearchTerm] = useState(''); // Local search state
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [newItemIds, setNewItemIds] = useState(new Set());
+  const [flashItemIds, setFlashItemIds] = useState(new Set());
+  const previousDataRef = useRef(null);
   const searchTerm = externalFilters?.searchTerm ?? localSearchTerm;
   
   // Load saved column preferences or use defaults - separate for each entity type
@@ -489,13 +494,49 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
     sortOrder: 'DESC'
   });
 
-  const { data: allClusters, isLoading } = useQuery({
+  const { data: allClusters, isLoading, refetch: refetchClusters } = useQuery({
     queryKey: [entityType === 'solution' ? 'solution-clusters' : 'clusters', apiFilters],
     queryFn: () => getClusters(apiFilters, entityType),
     refetchOnWindowFocus: false,
     refetchOnMount: false,
     keepPreviousData: true,
   });
+
+  // Handle refresh
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // Store current data before refresh
+      previousDataRef.current = allClusters ? new Set(allClusters.map(c => c.cluster_id)) : new Set();
+      await refetchClusters();
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
+
+  // Detect new items after data changes
+  useEffect(() => {
+    if (allClusters && previousDataRef.current) {
+      const newIds = new Set();
+      allClusters.forEach(cluster => {
+        // Item is new if it wasn't in previous data OR was created in last 10 seconds
+        if (!previousDataRef.current.has(cluster.cluster_id) || isNewItem(cluster.created_at)) {
+          newIds.add(cluster.cluster_id);
+        }
+      });
+      
+      if (newIds.size > 0) {
+        setNewItemIds(newIds);  // Keep persistent for green border
+        setFlashItemIds(newIds); // For flash animation
+        // Clear only the flash animation after 1.5 seconds
+        setTimeout(() => setFlashItemIds(new Set()), 1500);
+      } else {
+        // Clear new items on refresh if no new items found
+        setNewItemIds(new Set());
+        setFlashItemIds(new Set());
+      }
+    }
+  }, [allClusters]);
 
   // Client-side filtering for search and external filters
   const clusters = useMemo(() => {
@@ -640,13 +681,30 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
             <h2 className="text-lg font-semibold text-gray-800">
               {entityType === 'solution' ? 'Solution' : 'Problem'} Clusters ({clusters?.length || 0} total)
             </h2>
-            <ColumnSelector 
-              columns={entityType === 'solution' 
-                ? ALL_COLUMNS.filter(col => col.key !== 'status' && col.key !== 'problem_count')
-                : ALL_COLUMNS}
-              selectedColumns={visibleColumns}
-              onColumnChange={handleColumnChange}
-            />
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-2 px-3 py-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
+                title="Refresh data"
+              >
+                <svg 
+                  className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+              <ColumnSelector 
+                columns={entityType === 'solution' 
+                  ? ALL_COLUMNS.filter(col => col.key !== 'status' && col.key !== 'problem_count')
+                  : ALL_COLUMNS}
+                selectedColumns={visibleColumns}
+                onColumnChange={handleColumnChange}
+              />
+            </div>
           </div>
         </div>
         {/* Top scrollbar */}
@@ -699,6 +757,8 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
                   cluster={cluster} 
                   visibleColumns={visibleColumns}
                   entityType={entityType}
+                  isNew={newItemIds.has(cluster.cluster_id)}
+                  isFlashing={flashItemIds.has(cluster.cluster_id)}
                 />
               ))
             )}

@@ -5,46 +5,64 @@ import { getPipelineStats, getProblems, getClusters, getSolutions, getBestSoluti
 import { usePinnedEntities } from '../hooks/usePinnedEntities';
 import { ExternalLink } from 'lucide-react';
 import StudyModeModal from './StudyModeModal';
+import { formatNumber } from '../utils/numberUtils';
 
 function Dashboard() {
   const navigate = useNavigate();
   const [pinnedProblems, setPinnedProblems] = useState([]);
   const [pinnedSolutions, setPinnedSolutions] = useState([]);
   const [studyModeEntity, setStudyModeEntity] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Initialize pinning hooks
   const problemPins = usePinnedEntities('pinned-problems');
   const solutionPins = usePinnedEntities('pinned-solutions');
   
   // Fetch pipeline statistics
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery({
     queryKey: ['pipelineStats'],
     queryFn: getPipelineStats,
     refetchInterval: 30000, // Refresh every 30 seconds
   });
 
   // Fetch best solution candidate
-  const { data: bestCandidate } = useQuery({
+  const { data: bestCandidate, refetch: refetchBestCandidate } = useQuery({
     queryKey: ['bestSolutionCandidate'],
     queryFn: getBestSolutionCandidate,
     refetchInterval: 60000, // Refresh every minute
   });
 
   // Fetch data for insights and pinned entities
-  const { data: problems } = useQuery({
+  const { data: problems, refetch: refetchProblems } = useQuery({
     queryKey: ['problemsOverview'],
     queryFn: () => getProblems({ limit: 500 }),
   });
 
-  const { data: clusters } = useQuery({
+  const { data: clusters, refetch: refetchClusters } = useQuery({
     queryKey: ['clustersOverview'],
     queryFn: () => getClusters({ limit: 100 }),
   });
 
-  const { data: solutions } = useQuery({
+  const { data: solutions, refetch: refetchSolutions } = useQuery({
     queryKey: ['solutionsOverview'],
     queryFn: () => getSolutions({ limit: 500 }),
   });
+
+  // Handle refresh all data
+  const handleRefreshAll = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        refetchStats(),
+        refetchBestCandidate(),
+        refetchProblems(),
+        refetchClusters(),
+        refetchSolutions()
+      ]);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500); // Keep spinning for at least 500ms
+    }
+  };
 
   // Update pinned entities when data changes
   useEffect(() => {
@@ -83,8 +101,26 @@ function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">DreamTeam Studio V2</h1>
+        <button
+          onClick={handleRefreshAll}
+          disabled={isRefreshing}
+          className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+          title="Refresh all data"
+        >
+          <svg 
+            className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} 
+            fill="none" 
+            stroke="currentColor" 
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          {isRefreshing ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+      <div>
         <p className="mt-2 text-gray-600">Transform problems into software solutions</p>
       </div>
 
@@ -369,7 +405,7 @@ function MetricCard({ title, metric, label, submetric, color, onClick, trend, pr
         <span className="text-lg">{trendIcons[trend]}</span>
       </div>
       <div className="space-y-1">
-        <div className="text-3xl font-bold">{metric}</div>
+        <div className="text-3xl font-bold">{typeof metric === 'number' ? formatNumber(metric) : metric}</div>
         <div className="text-sm font-medium opacity-80">{label}</div>
         <div className="text-xs opacity-70">{submetric}</div>
         

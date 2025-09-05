@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Date Test</title>
+</head>
+<body>
+    <h1>Date Timezone Test</h1>
+    <div id="output"></div>
+    
+    <script>
+        // Test various date formats that might come from PostgreSQL
+        const testDates = [
+            '2024-01-15T15:45:00Z',           // ISO with Z (UTC)
+            '2024-01-15T15:45:00.000Z',       // ISO with milliseconds and Z
+            '2024-01-15T15:45:00+00:00',      // ISO with +00:00 timezone
+            '2024-01-15T15:45:00',            // ISO without timezone (ambiguous!)
+            '2024-01-15 15:45:00',            // PostgreSQL default format (no timezone)
+        ];
+        
+        const output = document.getElementById('output');
+        
+        testDates.forEach(dateStr => {
+            const d = new Date(dateStr);
+            const localStr = d.toLocaleString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            });
+            
+            output.innerHTML += `
+                <div style="margin: 20px; padding: 10px; border: 1px solid #ccc;">
+                    <strong>Input:</strong> ${dateStr}<br>
+                    <strong>Date object:</strong> ${d}<br>
+                    <strong>ISO String:</strong> ${d.toISOString()}<br>
+                    <strong>Local String:</strong> ${localStr}<br>
+                    <strong>Your Timezone:</strong> ${Intl.DateTimeFormat().resolvedOptions().timeZone}<br>
+                </div>
+            `;
+        });
+        
+        // Also test with our actual formatDateTime function
+        function formatDateTime(date) {
+            if (!date) return 'N/A';
+            const d = new Date(date);
+            if (isNaN(d.getTime())) return 'N/A';
+            
+            return d.toLocaleString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            });
+        }
+        
+        output.innerHTML += '<h2>Using formatDateTime function:</h2>';
+        testDates.forEach(dateStr => {
+            output.innerHTML += `<div>${dateStr} → ${formatDateTime(dateStr)}</div>`;
+        });
+    </script>
+</body>
+</html>

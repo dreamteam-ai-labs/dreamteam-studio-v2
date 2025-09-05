@@ -9,7 +9,14 @@ const __dirname = dirname(__filename);
 // Load .env from parent directory (studio-v2/)
 dotenv.config({ path: join(__dirname, '../../.env') });
 
-const { Pool } = pg;
+const { Pool, types } = pg;
+
+// Override the default parsing for TIMESTAMP to treat it as UTC
+// Type OID 1114 is TIMESTAMP WITHOUT TIME ZONE
+types.setTypeParser(1114, (stringValue) => {
+  // Append 'Z' to treat the timestamp as UTC
+  return stringValue ? new Date(stringValue + 'Z') : null;
+});
 
 // Create a connection pool for better performance
 const pool = new Pool({

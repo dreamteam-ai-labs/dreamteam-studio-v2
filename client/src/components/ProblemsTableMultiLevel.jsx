@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getProblems, getProblemsFilterOptions, getSolutionsByCluster, getSolutionsByProblem } from '../services/api';
+import { formatDateTime, isNewItem } from '../utils/dateUtils';
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
@@ -142,6 +143,10 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
   const [studyModalOpen, setStudyModalOpen] = useState(false);
   const [studyEntity, setStudyEntity] = useState(null);
   const [studyEntityType, setStudyEntityType] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [newItemIds, setNewItemIds] = useState(new Set());
+  const [flashItemIds, setFlashItemIds] = useState(new Set());
+  const previousDataRef = useRef(null);
   
   // Load collapsed state for filters
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(() => {
@@ -222,11 +227,47 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
   }, [externalFilters]);
 
   // Fetch ALL problems (without search filter)
-  const { data: allProblems, isLoading } = useQuery({
+  const { data: allProblems, isLoading, refetch: refetchProblems } = useQuery({
     queryKey: ['problems', apiFilters],
     queryFn: () => getProblems(apiFilters),
     refetchOnWindowFocus: false,
   });
+
+  // Handle refresh
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // Store current data before refresh
+      previousDataRef.current = allProblems ? new Set(allProblems.map(p => p.id)) : new Set();
+      await refetchProblems();
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
+
+  // Detect new items after data changes
+  useEffect(() => {
+    if (allProblems && previousDataRef.current) {
+      const newIds = new Set();
+      allProblems.forEach(problem => {
+        // Item is new if it wasn't in previous data OR was created in last 10 seconds
+        if (!previousDataRef.current.has(problem.id) || isNewItem(problem.created_at)) {
+          newIds.add(problem.id);
+        }
+      });
+      
+      if (newIds.size > 0) {
+        setNewItemIds(newIds);  // Keep persistent for green border
+        setFlashItemIds(newIds); // For flash animation
+        // Clear only the flash animation after 1.5 seconds
+        setTimeout(() => setFlashItemIds(new Set()), 1500);
+      } else {
+        // Clear new items on refresh if no new items found
+        setNewItemIds(new Set());
+        setFlashItemIds(new Set());
+      }
+    }
+  }, [allProblems]);
 
   // Client-side filtering for search and external filters
   const problems = useMemo(() => {
@@ -510,11 +551,28 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
                 </div>
               )}
             </div>
-            <ColumnSelector 
-              columns={ALL_COLUMNS}
-              selectedColumns={visibleColumns}
-              onColumnChange={handleColumnChange}
-            />
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-2 px-3 py-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
+                title="Refresh data"
+              >
+                <svg 
+                  className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+              <ColumnSelector 
+                columns={ALL_COLUMNS}
+                selectedColumns={visibleColumns}
+                onColumnChange={handleColumnChange}
+              />
+            </div>
           </div>
         </div>
         {/* Top scrollbar */}
@@ -570,7 +628,7 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
               return (
                 <React.Fragment key={problem.id}>
                   {/* Level 1: Problem Row */}
-                  <tr className={`hover:bg-gray-50 ${isPinned(problem.id) ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}>
+                  <tr className={`hover:bg-gray-50 ${isPinned(problem.id) ? 'bg-blue-50 border-l-4 border-blue-500' : ''} ${flashItemIds.has(problem.id) ? 'flash-new' : ''} ${newItemIds.has(problem.id) ? 'new-item' : ''}`}>
                     <td className="px-3 py-3 text-center" style={{ width: '40px' }}>
                       <input
                         type="checkbox"
@@ -653,7 +711,7 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
                     )}
                     {visibleColumns.includes('created_at') && (
                       <td className="px-4 py-3 text-sm text-gray-500">
-                        {new Date(problem.created_at).toLocaleDateString()}
+                        {formatDateTime(problem.created_at)}
                       </td>
                     )}
                     <td className="px-3 py-3 text-center" style={{ width: '100px' }}>
@@ -780,7 +838,7 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
               return (
                 <React.Fragment key={problem.id}>
                   {/* Level 1: Problem Row */}
-                  <tr className={`hover:bg-gray-50 ${isPinned(problem.id) ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}>
+                  <tr className={`hover:bg-gray-50 ${isPinned(problem.id) ? 'bg-blue-50 border-l-4 border-blue-500' : ''} ${flashItemIds.has(problem.id) ? 'flash-new' : ''} ${newItemIds.has(problem.id) ? 'new-item' : ''}`}>
                     <td className="px-3 py-3 text-center" style={{ width: '40px' }}>
                       <input
                         type="checkbox"
@@ -863,7 +921,7 @@ function ProblemsTableMultiLevel({ filters: externalFilters, onFiltersChange, on
                     )}
                     {visibleColumns.includes('created_at') && (
                       <td className="px-4 py-3 text-sm text-gray-500">
-                        {new Date(problem.created_at).toLocaleDateString()}
+                        {formatDateTime(problem.created_at)}
                       </td>
                     )}
                     <td className="px-3 py-3 text-center" style={{ width: '100px' }}>

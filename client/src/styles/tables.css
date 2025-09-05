@@ -1,3 +1,26 @@
+/* Flash animation for new items */
+@keyframes flashNew {
+  0% {
+    background-color: rgb(187, 247, 208);
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.flash-new td {
+  animation: flashNew 1.5s ease-out;
+  position: relative;
+}
+
+/* Persistent green border for new items */
+.new-item {
+  border-left: 4px solid rgb(34, 197, 94) !important;
+  background-color: rgba(187, 247, 208, 0.05);
+}
+
 /* Custom scrollbar styles for tables */
 .table-container {
   position: relative;

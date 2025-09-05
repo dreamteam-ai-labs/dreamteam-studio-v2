@@ -123,6 +123,7 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
   const [studyModalOpen, setStudyModalOpen] = useState(false); // Modal state
   const [studyEntity, setStudyEntity] = useState(null); // Entity to show in modal
   const [studyEntityType, setStudyEntityType] = useState(null); // Entity type for modal
+  const [isRefreshing, setIsRefreshing] = useState(false); // Refresh state
   const { fitView } = useReactFlow(); // Get fitView function from React Flow
   
   // Re-center graph when entering/exiting fullscreen
@@ -140,12 +141,12 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
   const searchTerm = globalFilters.searchTerm !== undefined ? globalFilters.searchTerm : localSearchTerm;
 
   // Fetch all data
-  const { data: problems } = useQuery({
+  const { data: problems, refetch: refetchProblems } = useQuery({
     queryKey: ['graph-problems'],
     queryFn: () => getProblems({}),
   });
 
-  const { data: clusters } = useQuery({
+  const { data: clusters, refetch: refetchClusters } = useQuery({
     queryKey: ['graph-clusters', initialEntityType],
     queryFn: () => getClusters({}, initialEntityType === 'solutionCluster' ? 'solution' : 'problem'),
   });
@@ -157,10 +158,25 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
     refetchOnWindowFocus: true,
   });
 
-  const { data: projects } = useQuery({
+  const { data: projects, refetch: refetchProjects } = useQuery({
     queryKey: ['graph-projects'],
     queryFn: getProjects,
   });
+
+  // Handle refresh all
+  const handleRefreshAll = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        refetchProblems(),
+        refetchClusters(),
+        refetchSolutions(),
+        refetchProjects()
+      ]);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
 
   // Refetch solutions when viewing solution clusters to ensure we have solution_cluster_id
   useEffect(() => {
@@ -1822,8 +1838,24 @@ function GraphViewContent({ globalFilters, initialEntityType }) {
 
       {/* Right Panel - Graph */}
       <div className="flex-1 bg-white rounded-lg shadow flex flex-col overflow-hidden">
-        {/* Fullscreen Toggle Button */}
-        <div className="px-4 py-2 border-b border-gray-200 flex justify-end">
+        {/* Graph Controls */}
+        <div className="px-4 py-2 border-b border-gray-200 flex justify-end gap-2">
+          <button
+            onClick={handleRefreshAll}
+            disabled={isRefreshing}
+            className="text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 px-3 py-1 rounded transition-all flex items-center gap-2 disabled:opacity-50"
+            title="Refresh all data"
+          >
+            <svg 
+              className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
             className="text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 px-3 py-1 rounded transition-all flex items-center gap-2"
