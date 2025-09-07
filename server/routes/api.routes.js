@@ -82,6 +82,18 @@ router.get('/clusters/filter-options', async (req, res) => {
   }
 });
 
+router.get('/clusters/:id', async (req, res) => {
+  try {
+    const cluster = await databaseService.getClusterById(req.params.id);
+    if (!cluster) {
+      return res.status(404).json({ error: 'Cluster not found' });
+    }
+    res.json(cluster);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/clusters/:id/problems', async (req, res) => {
   try {
     console.log(`Fetching problems for cluster ID: ${req.params.id}`);
@@ -117,6 +129,18 @@ router.get('/solution-clusters', async (req, res) => {
     };
     const clusters = await databaseService.getSolutionClusters(filters);
     res.json(clusters);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/solution-clusters/:id', async (req, res) => {
+  try {
+    const cluster = await databaseService.getSolutionClusterById(req.params.id);
+    if (!cluster) {
+      return res.status(404).json({ error: 'Solution cluster not found' });
+    }
+    res.json(cluster);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -336,6 +360,95 @@ router.get('/api-balances', async (req, res) => {
   } catch (error) {
     console.error('Error fetching API balances:', error);
     res.status(500).json({ error: 'Failed to fetch API balances' });
+  }
+});
+
+// === CLUSTERING SCENARIOS ===
+
+// Get current clustering configuration
+router.get('/clustering-config/:entityType', async (req, res) => {
+  try {
+    const { entityType } = req.params;
+    
+    if (!['problem', 'solution'].includes(entityType)) {
+      return res.status(400).json({ error: 'Invalid entity type' });
+    }
+    
+    const config = await databaseService.getClusteringConfig(entityType);
+    res.json(config);
+  } catch (error) {
+    console.error('Error fetching clustering config:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/clustering-scenarios', async (req, res) => {
+  try {
+    const { entity_type, k_value, similarity_threshold, requested_by, notes } = req.body;
+    
+    // Validate inputs
+    if (!entity_type || !k_value || !similarity_threshold) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: entity_type, k_value, similarity_threshold' 
+      });
+    }
+    
+    const scenarioId = await databaseService.createClusteringScenario(
+      entity_type,
+      k_value,
+      similarity_threshold,
+      requested_by,
+      notes
+    );
+    
+    res.json({ id: scenarioId, status: 'pending' });
+  } catch (error) {
+    console.error('Error creating clustering scenario:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/clustering-scenarios', async (req, res) => {
+  try {
+    const { entityType, status } = req.query;
+    const scenarios = await databaseService.getClusteringScenarios(entityType, status);
+    res.json(scenarios);
+  } catch (error) {
+    console.error('Error fetching clustering scenarios:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/clustering-scenarios/:id', async (req, res) => {
+  try {
+    const scenario = await databaseService.getClusteringScenarioDetails(req.params.id);
+    if (!scenario) {
+      return res.status(404).json({ error: 'Scenario not found' });
+    }
+    res.json(scenario);
+  } catch (error) {
+    console.error('Error fetching scenario details:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/clustering-scenarios/:id', async (req, res) => {
+  try {
+    await databaseService.deleteClusteringScenario(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting scenario:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/clustering-scenarios/:id/apply', async (req, res) => {
+  try {
+    const result = await databaseService.applyScenarioToProduction(req.params.id);
+    res.json(result);
+  } catch (error) {
+    console.error('Error applying scenario to production:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

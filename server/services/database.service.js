@@ -176,6 +176,39 @@ class DatabaseService {
   }
 
   // === CLUSTERS ===
+  async getClusterById(clusterId) {
+    try {
+      const query = `
+        WITH active_version AS (
+          SELECT COALESCE(
+            (SELECT version FROM dreamteam.cluster_versions WHERE is_active = true),
+            (SELECT MAX(version) FROM dreamteam.cluster_centroids)
+          ) as version
+        )
+        SELECT 
+          c.cluster_id,
+          c.cluster_label,
+          c.avg_similarity,
+          c.is_outlier_bucket,
+          c.created_at,
+          COUNT(DISTINCT p.id) as problem_count,
+          COUNT(DISTINCT s.id) as solution_count
+        FROM dreamteam.cluster_centroids c
+        LEFT JOIN dreamteam.problems p ON p.cluster_id = c.cluster_id
+        LEFT JOIN dreamteam.solutions s ON s.source_cluster_id = c.cluster_id
+        WHERE c.cluster_id = $1
+          AND c.version = (SELECT version FROM active_version)
+        GROUP BY c.cluster_id, c.cluster_label, c.avg_similarity, c.is_outlier_bucket, c.created_at
+      `;
+      
+      const result = await pool.query(query, [clusterId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error fetching cluster by ID:', error);
+      throw error;
+    }
+  }
+
   async getClusters(filters = {}) {
     try {
       let baseQuery;
@@ -196,7 +229,7 @@ class DatabaseService {
             LEFT JOIN dreamteam.problems p ON p.cluster_id = c.cluster_id
             LEFT JOIN dreamteam.solutions s ON s.source_cluster_id = c.cluster_id
             WHERE c.version = $${++paramCount}
-              AND c.is_outlier_bucket = false
+              -- Include outlier bucket to show all clusters
         `;
         params.push(filters.version);
       } else {
@@ -220,7 +253,7 @@ class DatabaseService {
             LEFT JOIN dreamteam.problems p ON p.cluster_id = c.cluster_id
             LEFT JOIN dreamteam.solutions s ON s.source_cluster_id = c.cluster_id
             WHERE c.version = (SELECT version FROM active_version)
-              AND c.is_outlier_bucket = false
+              -- Include outlier bucket to show all clusters
         `;
       }
       
@@ -748,6 +781,38 @@ class DatabaseService {
   }
 
   // === SOLUTION CLUSTERS ===
+  async getSolutionClusterById(clusterId) {
+    try {
+      const query = `
+        WITH active_version AS (
+          SELECT COALESCE(
+            (SELECT version FROM dreamteam.solution_cluster_versions WHERE is_active = true),
+            (SELECT MAX(version) FROM dreamteam.solution_cluster_centroids)
+          ) as version
+        )
+        SELECT 
+          c.cluster_id,
+          c.cluster_label,
+          c.avg_similarity,
+          c.is_outlier_bucket,
+          c.created_at,
+          COUNT(DISTINCT s.id) as solution_count,
+          0 as problem_count
+        FROM dreamteam.solution_cluster_centroids c
+        LEFT JOIN dreamteam.solutions s ON s.solution_cluster_id = c.cluster_id
+        WHERE c.cluster_id = $1
+          AND c.version = (SELECT version FROM active_version)
+        GROUP BY c.cluster_id, c.cluster_label, c.avg_similarity, c.is_outlier_bucket, c.created_at
+      `;
+      
+      const result = await pool.query(query, [clusterId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error fetching solution cluster by ID:', error);
+      throw error;
+    }
+  }
+
   async getSolutionClusters(filters = {}) {
     try {
       let baseQuery;
@@ -870,6 +935,218 @@ class DatabaseService {
       console.error('Error executing query:', error);
       throw error;
     }
+  }
+  // === CLUSTERING SCENARIOS ===
+  
+  async createClusteringScenario(entityType, kValue, similarityThreshold, requestedBy = null, notes = null) {
+    const result = await this.executeQuery(
+      `SELECT dreamteam.create_clustering_scenario($1, $2, $3, $4, $5) as scenario_id`,
+      [entityType, kValue, similarityThreshold, requestedBy, notes]
+    );
+    return result[0].scenario_id;
+  }
+
+  async getClusteringScenarios(entityType = null, status = null) {
+    let query = `
+      SELECT 
+        id,
+        entity_type,
+        k_value,
+        similarity_threshold,
+        status,
+        requested_at,
+        started_at,
+        completed_at,
+        requested_by,
+        total_items,
+        outlier_count,
+        outlier_percentage,
+        outlier_improvement_percentage,
+        notes
+      FROM dreamteam.clustering_scenarios
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    if (entityType) {
+      params.push(entityType);
+      query += ` AND entity_type = $${params.length}`;
+    }
+    if (status) {
+      params.push(status);
+      query += ` AND status = $${params.length}`;
+    }
+    
+    query += ' ORDER BY requested_at DESC LIMIT 20';
+    
+    const result = await this.executeQuery(query, params);
+    return result;
+  }
+
+  async getClusteringScenarioDetails(scenarioId) {
+    // Get scenario basic info
+    const scenarioResult = await this.executeQuery(
+      `SELECT * FROM dreamteam.clustering_scenarios WHERE id = $1`,
+      [scenarioId]
+    );
+    
+    if (scenarioResult.length === 0) {
+      return null;
+    }
+    
+    const scenario = scenarioResult[0];
+    
+    // If completed, get cluster details
+    if (scenario.status === 'completed') {
+      const clustersResult = await this.executeQuery(
+        `SELECT 
+          cluster_id as id,
+          cluster_id,
+          item_count,
+          avg_similarity,
+          min_similarity,
+          max_similarity,
+          is_outlier_bucket as is_outlier,
+          sample_titles,
+          sample_titles[1] as label
+        FROM dreamteam.scenario_clusters
+        WHERE scenario_id = $1
+        ORDER BY is_outlier_bucket, item_count DESC`,
+        [scenarioId]
+      );
+      
+      // For each cluster, get the items if needed
+      for (const cluster of clustersResult) {
+        if (cluster.item_count > 0) {
+          const itemsResult = await this.executeQuery(
+            `SELECT 
+              entity_id as id,
+              entity_id,
+              similarity
+            FROM dreamteam.scenario_assignments
+            WHERE scenario_id = $1 AND cluster_id = $2
+            LIMIT 50`,
+            [scenarioId, cluster.cluster_id]
+          );
+          
+          // Get the actual item details
+          const itemIds = itemsResult.map(item => item.entity_id);
+          if (itemIds.length > 0) {
+            const itemDetailsResult = await this.executeQuery(
+              `SELECT 
+                id,
+                title as name,
+                description as statement
+              FROM dreamteam.${scenario.entity_type}s
+              WHERE id = ANY($1::uuid[])`,
+              [itemIds]
+            );
+            
+            // Merge item details with similarity scores
+            cluster.items = itemsResult.map(item => {
+              const details = itemDetailsResult.find(d => d.id === item.entity_id);
+              return {
+                ...item,
+                ...details
+              };
+            });
+          }
+        }
+      }
+      
+      scenario.clusters = clustersResult;
+    }
+    
+    return scenario;
+  }
+
+  async deleteClusteringScenario(scenarioId) {
+    await this.executeQuery(
+      `DELETE FROM dreamteam.clustering_scenarios WHERE id = $1 AND status IN ('pending', 'failed', 'completed')`,
+      [scenarioId]
+    );
+  }
+
+  async getClusteringConfig(entityType) {
+    const result = await this.executeQuery(
+      `SELECT 
+        k_value,
+        similarity_threshold,
+        outlier_percentage,
+        cluster_count,
+        avg_cluster_size,
+        last_updated
+      FROM dreamteam.clustering_config
+      WHERE entity_type = $1`,
+      [entityType]
+    );
+    
+    if (result.length === 0) {
+      // Return defaults if no config exists yet
+      return {
+        k_value: 25,
+        similarity_threshold: 0.60,
+        outlier_percentage: null,
+        cluster_count: null,
+        avg_cluster_size: null,
+        last_updated: null
+      };
+    }
+    
+    return result[0];
+  }
+  
+  async applyScenarioToProduction(scenarioId) {
+    // First check if scenario is completed
+    const scenarioResult = await this.executeQuery(
+      `SELECT entity_type, status FROM dreamteam.clustering_scenarios WHERE id = $1`,
+      [scenarioId]
+    );
+    
+    if (scenarioResult.length === 0) {
+      throw new Error('Scenario not found');
+    }
+    
+    if (scenarioResult[0].status !== 'completed') {
+      throw new Error('Can only apply completed scenarios');
+    }
+    
+    const entityType = scenarioResult[0].entity_type;
+    
+    // Apply the scenario assignments to production
+    if (entityType === 'problem') {
+      await this.executeQuery(
+        `UPDATE dreamteam.problems p
+         SET 
+           cluster_id = sa.cluster_id,
+           cluster_similarity = sa.similarity::REAL
+         FROM dreamteam.scenario_assignments sa
+         WHERE sa.scenario_id = $1
+           AND sa.entity_id = p.id`,
+        [scenarioId]
+      );
+    } else {
+      await this.executeQuery(
+        `UPDATE dreamteam.solutions s
+         SET 
+           solution_cluster_id = sa.cluster_id,
+           cluster_similarity = sa.similarity::REAL
+         FROM dreamteam.scenario_assignments sa
+         WHERE sa.scenario_id = $1
+           AND sa.entity_id = s.id`,
+        [scenarioId]
+      );
+    }
+    
+    // Mark scenario as applied
+    await this.executeQuery(
+      `UPDATE dreamteam.clustering_scenarios 
+       SET notes = COALESCE(notes || ' | ', '') || 'Applied to production at ' || NOW()::TEXT
+       WHERE id = $1`,
+      [scenarioId]
+    );
+    
+    return { success: true, entityType };
   }
 }
 

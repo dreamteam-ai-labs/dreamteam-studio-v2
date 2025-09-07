@@ -7,6 +7,7 @@ import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
 import { useTableFeatures } from '../hooks/useTableFeatures';
+import { usePinnedEntities } from '../hooks/usePinnedEntities';
 import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
 import '../styles/tables.css';
 
@@ -123,7 +124,7 @@ const FiltersSection = memo(function FiltersSection({
 });
 
 // Cluster row component for expandable functionality
-function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, isFlashing }) {
+function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, isFlashing, onStudy, isPinned, onTogglePin }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [problemSort, setProblemSort] = useState({ field: 'impact', order: 'desc' });
   const [solutionSort, setSolutionSort] = useState({ field: 'viability', order: 'desc' });
@@ -208,15 +209,25 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, is
 
   return (
     <>
-      <tr className={`hover:bg-gray-50 cursor-pointer ${isFlashing ? 'flash-new' : ''} ${isNew ? 'new-item' : ''}`} onClick={() => setIsExpanded(!isExpanded)}>
+      <tr className={`hover:bg-gray-50 cursor-pointer ${isPinned ? 'bg-blue-50 border-l-4 border-blue-500' : ''} ${isFlashing ? 'flash-new' : ''} ${isNew ? 'new-item' : ''}`} onClick={() => setIsExpanded(!isExpanded)}>
         <td className="px-6 py-4" style={{ minWidth: '350px' }}>
           <div className="flex items-center gap-2">
             <span className="text-gray-400 flex-shrink-0">
               {isExpanded ? '▼' : '▶'}
             </span>
             <div className="min-w-0">
-              <span className="text-sm font-medium text-gray-900 block whitespace-normal">
-                {cluster.cluster_label}
+              <span className={`text-sm font-medium block whitespace-normal ${
+                (cluster.cluster_label === 'Outliers / Low Confidence' || 
+                 cluster.cluster_label === 'Uncategorized Solutions' ||
+                 cluster.is_outlier_bucket)
+                  ? 'text-gray-500 italic' 
+                  : 'text-gray-900'
+              }`}>
+                {(cluster.cluster_label === 'Outliers / Low Confidence' || 
+                  cluster.cluster_label === 'Uncategorized Solutions' ||
+                  cluster.is_outlier_bucket)
+                  ? '⚠️ Outlier Bucket' 
+                  : cluster.cluster_label}
               </span>
               <div className="flex gap-2 mt-1 flex-wrap">
                 {entityType === 'problem' && cluster.problem_count > 0 && (
@@ -248,7 +259,12 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, is
         
         {visibleColumns.includes('avg_similarity') && (
           <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '120px' }}>
-            {cluster.avg_similarity ? parseFloat(cluster.avg_similarity).toFixed(3) : 'N/A'}
+            {(cluster.cluster_label === 'Outliers / Low Confidence' || 
+              cluster.cluster_label === 'Uncategorized Solutions' ||
+              cluster.is_outlier_bucket)
+              ? <span className="text-gray-400">&lt; 0.55</span>
+              : cluster.avg_similarity ? parseFloat(cluster.avg_similarity).toFixed(3) : 'N/A'
+            }
           </td>
         )}
         
@@ -269,6 +285,38 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, is
             {formatDateTime(cluster.created_at)}
           </td>
         )}
+        <td className="px-3 py-4 text-center" style={{ width: '120px' }}>
+          <div className="flex gap-1 justify-center">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onStudy) onStudy(cluster);
+              }}
+              className="p-2 rounded-lg transition-all transform hover:scale-110 text-purple-500 hover:text-purple-700 hover:bg-purple-100"
+              title="Study this cluster"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+              </svg>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onTogglePin) onTogglePin(cluster.cluster_id);
+              }}
+              className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
+                isPinned 
+                  ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+              title={isPinned ? 'Unpin' : 'Pin to top'}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+              </svg>
+            </button>
+          </div>
+        </td>
       </tr>
       
       
@@ -428,7 +476,7 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, is
   );
 }
 
-function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFiltered, entityType = 'problem' }) {
+function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFiltered, entityType = 'problem', onStudy }) {
   // Use external filters if provided, otherwise use local state
   const [localSearchTerm, setLocalSearchTerm] = useState(''); // Local search state
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -436,6 +484,38 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
   const [flashItemIds, setFlashItemIds] = useState(new Set());
   const previousDataRef = useRef(null);
   const searchTerm = externalFilters?.searchTerm ?? localSearchTerm;
+  
+  // Use pinning hook with different storage keys for problem vs solution clusters
+  const storageKey = entityType === 'solution' ? 'pinned-solution-clusters' : 'pinned-problem-clusters';
+  const {
+    pinnedIds,
+    togglePin,
+    isPinned,
+    separateEntities: originalSeparateEntities
+  } = usePinnedEntities(storageKey);
+  
+  // Wrapper for separateEntities to handle cluster_id instead of id
+  const separateEntities = useCallback((clusters) => {
+    const pinned = [];
+    const unpinned = [];
+    
+    // First, collect pinned clusters in the order they were pinned
+    pinnedIds.forEach(pinnedId => {
+      const cluster = clusters.find(c => c.cluster_id === pinnedId);
+      if (cluster) {
+        pinned.push(cluster);
+      }
+    });
+    
+    // Then collect unpinned clusters
+    clusters.forEach(cluster => {
+      if (!pinnedIds.includes(cluster.cluster_id)) {
+        unpinned.push(cluster);
+      }
+    });
+    
+    return { pinned, unpinned };
+  }, [pinnedIds]);
   
   // Load saved column preferences or use defaults - separate for each entity type
   const [visibleColumns, setVisibleColumns] = useState(() => {
@@ -595,9 +675,36 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
       }
     }
     
-    return filtered;
-  }, [allClusters, searchTerm, externalFilters]);
+    // Separate pinned and unpinned clusters
+    const { pinned, unpinned } = separateEntities(filtered);
+    
+    // Sort unpinned clusters to put outlier bucket at the bottom
+    const sortedUnpinned = unpinned.sort((a, b) => {
+      // Outlier bucket always goes to bottom
+      const aIsOutlier = a.cluster_label === 'Outliers / Low Confidence' || 
+                         a.cluster_label === 'Uncategorized Solutions' ||
+                         a.is_outlier_bucket;
+      const bIsOutlier = b.cluster_label === 'Outliers / Low Confidence' || 
+                         b.cluster_label === 'Uncategorized Solutions' ||
+                         b.is_outlier_bucket;
+      
+      if (aIsOutlier) return 1;
+      if (bIsOutlier) return -1;
+      // Otherwise sort by problem count descending
+      return (b.problem_count || 0) - (a.problem_count || 0);
+    });
+    
+    // Return pinned first, then sorted unpinned
+    return [...pinned, ...sortedUnpinned];
+  }, [allClusters, searchTerm, externalFilters, separateEntities]);
 
+  // Memoize the separated clusters to avoid recalculating
+  const { pinnedClusters, unpinnedClusters } = useMemo(() => {
+    if (!clusters) return { pinnedClusters: [], unpinnedClusters: [] };
+    const { pinned, unpinned } = separateEntities(clusters);
+    return { pinnedClusters: pinned, unpinnedClusters: unpinned };
+  }, [clusters, separateEntities]);
+  
   // Pass filtered data back to parent
   useEffect(() => {
     if (onDataFiltered) {
@@ -751,16 +858,46 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
                 </td>
               </tr>
             ) : (
-              clusters?.map((cluster) => (
-                <ClusterRow 
-                  key={cluster.cluster_id} 
-                  cluster={cluster} 
-                  visibleColumns={visibleColumns}
-                  entityType={entityType}
-                  isNew={newItemIds.has(cluster.cluster_id)}
-                  isFlashing={flashItemIds.has(cluster.cluster_id)}
-                />
-              ))
+              <>
+                {/* Render pinned clusters first */}
+                {pinnedClusters.map((cluster) => (
+                  <ClusterRow 
+                    key={cluster.cluster_id} 
+                    cluster={cluster} 
+                    visibleColumns={visibleColumns}
+                    entityType={entityType}
+                    isNew={newItemIds.has(cluster.cluster_id)}
+                    isFlashing={flashItemIds.has(cluster.cluster_id)}
+                    onStudy={onStudy}
+                    isPinned={true}
+                    onTogglePin={togglePin}
+                  />
+                ))}
+                
+                {/* Divider between pinned and unpinned */}
+                {pinnedClusters.length > 0 && unpinnedClusters.length > 0 && (
+                  <tr className="bg-gray-100">
+                    <td colSpan={visibleColumns.length + 1} className="px-6 py-2 text-xs text-gray-500 font-medium">
+                      Other Clusters
+                    </td>
+                  </tr>
+                )}
+                
+                {/* Render unpinned clusters */}
+                {unpinnedClusters.map((cluster) => (
+                  <ClusterRow 
+                    key={cluster.cluster_id} 
+                    cluster={cluster} 
+                    visibleColumns={visibleColumns}
+                    entityType={entityType}
+                    isNew={newItemIds.has(cluster.cluster_id)}
+                    isFlashing={flashItemIds.has(cluster.cluster_id)}
+                    onStudy={onStudy}
+                    isPinned={false}
+                    onTogglePin={togglePin}
+                  />
+                ))}
+              </>
             )}
           </tbody>
         </table>

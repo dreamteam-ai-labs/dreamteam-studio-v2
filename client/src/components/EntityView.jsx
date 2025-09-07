@@ -3,9 +3,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import ProblemsTableMultiLevel from './ProblemsTableMultiLevel';
 import ClustersTable from './ClustersTable';
+import ClusterConfiguration from './ClusterConfiguration';
 import SolutionsTable from './SolutionsTable';
 import ProjectsTable from './ProjectsTable';
 import GraphView from './GraphView';
+import StudyModeModal from './StudyModeModal';
 import { getProblemsFilterOptions, getClustersFilterOptions, getSolutionsFilterOptions } from '../services/api';
 
 function EntityView({ entityType }) {
@@ -18,7 +20,9 @@ function EntityView({ entityType }) {
     }
     return 'individual';
   }); // 'individual' or 'clusters'
+  const [clusterTab, setClusterTab] = useState('clusters'); // 'clusters' or 'configuration'
   const [filteredData, setFilteredData] = useState([]); // Store filtered data from tables
+  const [studyModeEntity, setStudyModeEntity] = useState(null);
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(() => {
     const saved = localStorage.getItem('entityview-filters-collapsed');
     return saved === 'true';
@@ -196,14 +200,53 @@ function EntityView({ entityType }) {
 
   // Get the appropriate table component based on entity type and data mode
   const getTableComponent = () => {
-    // If in clusters mode, show clusters table
+    // If in clusters mode, show clusters table with tabs
     if (dataMode === 'clusters' && (entityType === 'problem' || entityType === 'solution')) {
-      return <ClustersTable 
-        filters={filters} 
-        onFiltersChange={setFilters} 
-        onDataFiltered={setFilteredData} 
-        entityType={entityType} 
-      />;
+      return (
+        <div>
+          {/* Tab Navigation */}
+          <div className="bg-white border-b">
+            <nav className="-mb-px flex">
+              <button
+                onClick={() => setClusterTab('clusters')}
+                className={`px-6 py-3 text-sm font-medium border-b-2 ${
+                  clusterTab === 'clusters'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Clusters
+              </button>
+              <button
+                onClick={() => setClusterTab('configuration')}
+                className={`px-6 py-3 text-sm font-medium border-b-2 ${
+                  clusterTab === 'configuration'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Scenarios
+              </button>
+            </nav>
+          </div>
+          
+          {/* Tab Content */}
+          {clusterTab === 'clusters' ? (
+            <ClustersTable 
+              filters={filters} 
+              onFiltersChange={setFilters} 
+              onDataFiltered={setFilteredData} 
+              entityType={entityType}
+              onStudy={(cluster) => setStudyModeEntity({ 
+                type: entityType === 'solution' ? 'solutionCluster' : 'cluster', 
+                data: cluster 
+              })}
+            />
+          ) : (
+            <ClusterConfiguration entityType={entityType} />
+          )}
+        </div>
+      );
     }
     
     // Otherwise show individual items table
@@ -944,6 +987,16 @@ function EntityView({ entityType }) {
             : entityType} 
           filters={filters}
           hideFilters={true}
+        />
+      )}
+
+      {/* Study Mode Modal */}
+      {studyModeEntity && (
+        <StudyModeModal
+          isOpen={!!studyModeEntity}
+          entityType={studyModeEntity.type}
+          initialEntity={studyModeEntity.data}
+          onClose={() => setStudyModeEntity(null)}
         />
       )}
     </div>

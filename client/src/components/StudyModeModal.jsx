@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getProblems, getSolutions, getSolutionsByProblem, getSolutionsByCluster, getProblemsBySolution, getProblemsByCluster } from '../services/api';
+import { getProblems, getSolutions, getSolutionsByProblem, getSolutionsByCluster, getSolutionsBySolutionCluster, getProblemsBySolution, getProblemsByCluster, getClusterById } from '../services/api';
 import { formatCurrency, formatLargeCurrency } from '../utils/numberUtils';
 
 function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
@@ -57,6 +57,43 @@ function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
     enabled: currentType === 'solution' && !!currentEntity?.source_cluster_id,
   });
 
+  // Fetch problems for cluster entity (only for problem clusters)
+  const { data: clusterEntityProblems } = useQuery({
+    queryKey: ['cluster-entity-problems', currentEntity?.cluster_id, currentType],
+    queryFn: () => {
+      if (currentType === 'cluster' && currentEntity?.cluster_id) {
+        return getProblemsByCluster(currentEntity.cluster_id);
+      }
+      return null;
+    },
+    enabled: currentType === 'cluster' && !!currentEntity?.cluster_id,
+  });
+
+  // Fetch solutions for cluster entity (for problem clusters)
+  const { data: clusterEntitySolutions } = useQuery({
+    queryKey: ['cluster-entity-solutions', currentEntity?.cluster_id, currentType],
+    queryFn: () => {
+      if (currentType === 'cluster' && currentEntity?.cluster_id) {
+        return getSolutionsByCluster(currentEntity.cluster_id);
+      }
+      return null;
+    },
+    enabled: currentType === 'cluster' && !!currentEntity?.cluster_id,
+  });
+
+  // Fetch solutions for solution cluster entity
+  const { data: solutionClusterSolutions } = useQuery({
+    queryKey: ['solution-cluster-solutions', currentEntity?.cluster_id, currentType],
+    queryFn: () => {
+      if (currentType === 'solutionCluster' && currentEntity?.cluster_id) {
+        // Get solutions that belong to this solution cluster
+        return getSolutionsBySolutionCluster(currentEntity.cluster_id);
+      }
+      return null;
+    },
+    enabled: currentType === 'solutionCluster' && !!currentEntity?.cluster_id,
+  });
+
   if (!isOpen) return null;
 
   const navigateToEntity = (entity, type) => {
@@ -95,7 +132,7 @@ function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
               index === navigationHistory.length - 1 ? 'font-semibold text-gray-900' : ''
             }`}
           >
-            {item.type === 'problem' ? '❓' : '💡'} {item.entity.title || item.entity.identifier}
+            {item.type === 'problem' ? '❓' : item.type === 'solution' ? '💡' : '📊'} {item.entity.title || item.entity.cluster_label || item.entity.identifier}
           </button>
         </React.Fragment>
       ))}
@@ -103,7 +140,58 @@ function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
   );
 
   const renderOverviewTab = () => {
-    if (currentType === 'problem') {
+    if (currentType === 'cluster' || currentType === 'solutionCluster') {
+      return (
+        <div className="space-y-6">
+          {/* Cluster Header */}
+          <div>
+            <h3 className="text-2xl font-bold text-gray-900 mb-2">
+              {currentEntity.is_outlier_bucket ? '⚠️ Outlier Bucket' : currentEntity.cluster_label}
+            </h3>
+            <div className="flex gap-3 mb-4">
+              <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-sm">
+                📊 Cluster ID: {currentEntity.cluster_id?.slice(0, 8)}...
+              </span>
+              {currentEntity.avg_similarity && (
+                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-sm">
+                  Similarity: {(currentEntity.avg_similarity * 100).toFixed(1)}%
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Cluster Statistics */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="bg-white p-4 rounded-lg border border-gray-200">
+              <div className="text-sm text-gray-500 mb-1">Problems</div>
+              <div className="font-medium text-xl">{currentEntity.problem_count || 0}</div>
+            </div>
+            <div className="bg-white p-4 rounded-lg border border-gray-200">
+              <div className="text-sm text-gray-500 mb-1">Solutions</div>
+              <div className="font-medium text-xl">{currentEntity.solution_count || 0}</div>
+            </div>
+            {currentEntity.created_at && (
+              <div className="bg-white p-4 rounded-lg border border-gray-200">
+                <div className="text-sm text-gray-500 mb-1">Created</div>
+                <div className="font-medium">{new Date(currentEntity.created_at).toLocaleDateString()}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Cluster Description */}
+          {currentEntity.is_outlier_bucket && (
+            <div className="bg-yellow-50 p-6 rounded-lg border border-yellow-200">
+              <h4 className="font-semibold text-yellow-900 mb-3">About the Outlier Bucket</h4>
+              <p className="text-yellow-800 leading-relaxed">
+                This cluster contains problems that have low similarity scores (&lt; 0.55) with other problems,
+                or are considered outliers in the clustering process. These problems may be unique,
+                edge cases, or require individual attention.
+              </p>
+            </div>
+          )}
+        </div>
+      );
+    } else if (currentType === 'problem') {
       return (
         <div className="space-y-6">
           {/* Problem Header */}
@@ -265,7 +353,150 @@ function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
   };
 
   const renderRelationshipsTab = () => {
-    if (currentType === 'problem') {
+    if (currentType === 'solutionCluster') {
+      // For solution clusters, only show solutions
+      return (
+        <div className="space-y-6">
+          {/* Solutions in this Cluster */}
+          <div>
+            <h4 className="font-semibold text-gray-700 mb-4">Solutions in this Cluster ({solutionClusterSolutions?.length || 0})</h4>
+            {solutionClusterSolutions && solutionClusterSolutions.length > 0 ? (
+              <div className="grid gap-4">
+                {solutionClusterSolutions.map(solution => (
+                  <div key={solution.id}
+                       className="bg-white p-4 rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer"
+                       onClick={() => navigateToEntity(solution, 'solution')}>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <h5 className="font-medium text-gray-900 mb-2">{solution.title}</h5>
+                        <p className="text-sm text-gray-600 line-clamp-2">{solution.description}</p>
+                      </div>
+                      <div className="ml-4 text-right">
+                        {solution.overall_viability && (
+                          <div className={`text-lg font-bold ${
+                            solution.overall_viability >= 80 ? 'text-green-600' :
+                            solution.overall_viability >= 60 ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {solution.overall_viability}%
+                          </div>
+                        )}
+                        <div className="text-xs text-gray-500">viability</div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <span className="text-xs px-2 py-1 bg-gray-100 rounded">
+                        Click to explore →
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 italic">No solutions in this cluster</p>
+            )}
+          </div>
+        </div>
+      );
+    } else if (currentType === 'cluster') {
+      return (
+        <div className="space-y-6">
+          {/* Cluster Problems */}
+          <div>
+            <h4 className="font-semibold text-gray-700 mb-4">Problems in this Cluster ({clusterEntityProblems?.length || 0})</h4>
+            {clusterEntityProblems && clusterEntityProblems.length > 0 ? (
+              <div className="grid gap-4">
+                {clusterEntityProblems.map(problem => (
+                  <div key={problem.id} 
+                       className="bg-white p-4 rounded-lg border border-gray-200 hover:border-purple-300 hover:shadow-md transition-all cursor-pointer"
+                       onClick={() => navigateToEntity(problem, 'problem')}>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <h5 className="font-medium text-gray-900 mb-2">{problem.title}</h5>
+                        <p className="text-sm text-gray-600 line-clamp-2">{problem.description}</p>
+                        {problem.source_url && (
+                          <a 
+                            href={problem.source_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                            View Source
+                          </a>
+                        )}
+                      </div>
+                      <div className="ml-4 text-right">
+                        {problem.impact && (
+                          <div className={`text-sm font-medium px-2 py-1 rounded ${
+                            problem.impact === 'critical' ? 'bg-purple-100 text-purple-700' :
+                            problem.impact === 'high' ? 'bg-red-100 text-red-700' :
+                            problem.impact === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-green-100 text-green-700'
+                          }`}>
+                            {problem.impact}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <span className="text-xs px-2 py-1 bg-gray-100 rounded">
+                        Click to explore →
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 italic">No problems in this cluster</p>
+            )}
+          </div>
+
+          {/* Cluster Solutions */}
+          <div>
+            <h4 className="font-semibold text-gray-700 mb-4">Solutions for this Cluster ({clusterEntitySolutions?.length || 0})</h4>
+            {clusterEntitySolutions && clusterEntitySolutions.length > 0 ? (
+              <div className="grid gap-4">
+                {clusterEntitySolutions.map(solution => (
+                  <div key={solution.id}
+                       className="bg-white p-4 rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer"
+                       onClick={() => navigateToEntity(solution, 'solution')}>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <h5 className="font-medium text-gray-900 mb-2">{solution.title}</h5>
+                        <p className="text-sm text-gray-600 line-clamp-2">{solution.description}</p>
+                      </div>
+                      <div className="ml-4 text-right">
+                        {solution.overall_viability && (
+                          <div className={`text-lg font-bold ${
+                            solution.overall_viability >= 80 ? 'text-green-600' :
+                            solution.overall_viability >= 60 ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {solution.overall_viability}%
+                          </div>
+                        )}
+                        <div className="text-xs text-gray-500">viability</div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <span className="text-xs px-2 py-1 bg-gray-100 rounded">
+                        Click to explore →
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 italic">No solutions for this cluster yet</p>
+            )}
+          </div>
+        </div>
+      );
+    } else if (currentType === 'problem') {
       return (
         <div className="space-y-6">
           {/* Direct Solutions */}
@@ -475,13 +706,13 @@ function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
         {/* Modal */}
         <div className="relative bg-white rounded-xl shadow-2xl max-w-7xl w-full max-h-[95vh] overflow-hidden">
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-4">
+          <div className="bg-gray-50 border-b px-6 py-4">
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-4">
                 {navigationHistory.length > 1 && (
                   <button
                     onClick={goBack}
-                    className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                    className="p-2 hover:bg-gray-200 rounded-lg transition-colors text-gray-600"
                     title="Go back"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -489,11 +720,19 @@ function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
                     </svg>
                   </button>
                 )}
-                <h2 className="text-xl font-bold">Study Mode</h2>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">Study Mode</h2>
+                  <p className="text-sm text-gray-600 mt-0.5">
+                    {currentType === 'problem' ? 'Problem Analysis' : 
+                     currentType === 'solution' ? 'Solution Analysis' : 
+                     currentType === 'cluster' ? 'Cluster Analysis' :
+                     currentType === 'solutionCluster' ? 'Solution Cluster Analysis' : 'Analysis'}
+                  </p>
+                </div>
               </div>
               <button
                 onClick={onClose}
-                className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                className="p-2 hover:bg-gray-200 rounded-lg transition-colors text-gray-500"
                 title="Close"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

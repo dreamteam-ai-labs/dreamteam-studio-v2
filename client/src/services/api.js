@@ -41,6 +41,7 @@ export const getClusters = (filters = {}, entityType = 'problem') => {
   const endpoint = entityType === 'solution' ? '/solution-clusters' : '/clusters';
   return api.get(endpoint, { params: filters });
 };
+export const getClusterById = (clusterId) => api.get(`/clusters/${clusterId}`);
 export const getProblemsByCluster = (clusterId) => api.get(`/clusters/${clusterId}/problems`);
 export const getClustersFilterOptions = () => api.get('/clusters/filter-options');
 
@@ -49,6 +50,7 @@ export const getSolutions = (filters = {}) => api.get('/solutions', { params: fi
 export const getProblemsBySolution = (solutionId) => api.get(`/solutions/${solutionId}/problems`);
 export const getSolutionsFilterOptions = () => api.get('/solutions/filter-options');
 export const getSolutionsByCluster = (clusterId) => api.get('/solutions', { params: { cluster_id: clusterId } });
+export const getSolutionsBySolutionCluster = (clusterId) => api.get(`/solution-clusters/${clusterId}/solutions`);
 export const getSolutionsByProblem = (problemId) => api.get(`/problems/${problemId}/solutions`);
 export const getBestSolutionCandidate = () => api.get('/solutions/best-candidate');
 
@@ -70,5 +72,18 @@ export const checkHealth = () => api.get('/health');
 
 // API Balances
 export const getApiBalances = () => api.get('/api-balances');
+
+// Clustering Scenarios
+export const getClusteringConfig = (entityType) => api.get(`/clustering-config/${entityType}`);
+export const createClusteringScenario = (data) => api.post('/clustering-scenarios', data);
+export const getClusteringScenarios = (entityType, status) => {
+  const params = {};
+  if (entityType) params.entityType = entityType;
+  if (status) params.status = status;
+  return api.get('/clustering-scenarios', { params });
+};
+export const getClusteringScenarioDetails = (id) => api.get(`/clustering-scenarios/${id}`);
+export const deleteClusteringScenario = (id) => api.delete(`/clustering-scenarios/${id}`);
+export const applyScenarioToProduction = (id) => api.post(`/clustering-scenarios/${id}/apply`);
 
 export default api;
