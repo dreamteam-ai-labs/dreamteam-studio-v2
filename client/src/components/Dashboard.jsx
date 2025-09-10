@@ -5,6 +5,7 @@ import { getPipelineStats, getProblems, getClusters, getSolutions, getBestSoluti
 import { usePinnedEntities } from '../hooks/usePinnedEntities';
 import { ExternalLink } from 'lucide-react';
 import StudyModeModal from './StudyModeModal';
+import BestCandidateExplainer from './BestCandidateExplainer';
 import { formatNumber } from '../utils/numberUtils';
 
 function Dashboard() {
@@ -124,41 +125,49 @@ function Dashboard() {
         <p className="mt-2 text-gray-600">Transform problems into software solutions</p>
       </div>
 
-      {/* Best Solution Candidate Alert */}
+      {/* Best Solution Candidate with Explainer */}
       {bestCandidate && (
-        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg shadow-sm p-6">
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <h3 className="text-lg font-semibold text-gray-900">🎯 Best Solution Candidate for Project Birth</h3>
-              </div>
-              <div className="space-y-2">
-                <p className="text-gray-800 font-medium text-lg">{bestCandidate.solution_name || bestCandidate.title}</p>
-                <div className="flex items-center gap-6 text-sm text-gray-600">
-                  <span>Selection Score: <span className="font-semibold text-green-700">{bestCandidate.selection_score}/100</span></span>
-                  <span>Viability: <span className="font-semibold">{bestCandidate.overall_viability}%</span></span>
-                  <span>LTV/CAC: <span className="font-semibold">{bestCandidate.ltv_cac_ratio}x</span></span>
-                  <span>Problems: <span className="font-semibold">{bestCandidate.problem_count}</span></span>
+        <div className="space-y-4">
+          <BestCandidateExplainer solution={bestCandidate} />
+          
+          {/* Solution Details Card */}
+          <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-6">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="space-y-2">
+                  <p className="text-gray-800 font-medium text-lg">{bestCandidate.solution_name || bestCandidate.title}</p>
+                  <p className="text-gray-600 text-sm">{bestCandidate.description}</p>
+                  {bestCandidate.value_proposition && (
+                    <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+                      <p className="text-sm font-medium text-blue-900">Value Proposition:</p>
+                      <p className="text-sm text-blue-700 mt-1">{bestCandidate.value_proposition}</p>
+                    </div>
+                  )}
                 </div>
-                <p className="text-gray-600 text-sm mt-2">{bestCandidate.description}</p>
               </div>
-            </div>
-            <div className="ml-4 flex items-center justify-center">
-              <button
-                onClick={() => {
-                  console.log('Opening study mode for best candidate:', bestCandidate);
-                  setStudyModeEntity({ type: 'solution', data: bestCandidate });
-                }}
-                className="p-2 rounded-lg transition-all transform hover:scale-110 text-purple-500 hover:text-purple-700 hover:bg-purple-100"
-                title="Study this solution"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
-                </svg>
-              </button>
+              <div className="ml-4 flex flex-col gap-2">
+                <button
+                  onClick={() => {
+                    console.log('Opening study mode for best candidate:', bestCandidate);
+                    setStudyModeEntity({ type: 'solution', data: bestCandidate });
+                  }}
+                  className="p-2 rounded-lg transition-all transform hover:scale-110 text-purple-500 hover:text-purple-700 hover:bg-purple-100"
+                  title="Study this solution"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                  </svg>
+                </button>
+                <button
+                  onClick={() => navigate('/solutions')}
+                  className="p-2 rounded-lg transition-all text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                  title="View all solutions"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -72,12 +72,6 @@ function ScenarioResults({ scenarioId, onClose }) {
             <span className="text-lg font-semibold">Error</span>
           </div>
           <p className="text-gray-700 mb-6">{error}</p>
-          <button 
-            onClick={onClose}
-            className="w-full px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
-          >
-            Close
-          </button>
         </div>
       </div>
     );
@@ -118,9 +112,12 @@ function ScenarioResults({ scenarioId, onClose }) {
             </div>
             <button 
               onClick={onClose}
-              className="text-gray-500 hover:text-gray-700 transition-colors p-1"
+              className="p-2 hover:bg-gray-200 rounded-lg transition-colors text-gray-500"
+              title="Close"
             >
-              <XCircle className="h-6 w-6" />
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
           </div>
         </div>
@@ -378,16 +375,10 @@ function ScenarioResults({ scenarioId, onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="border-t p-4 bg-gray-50 flex justify-between items-center">
+        <div className="border-t p-4 bg-gray-50">
           <div className="text-sm text-gray-600">
             Created: {new Date(scenario.requested_at).toLocaleString()}
           </div>
-          <button 
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
-          >
-            Close
-          </button>
         </div>
       </div>
     </div>

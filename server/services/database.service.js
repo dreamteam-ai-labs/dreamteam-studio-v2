@@ -221,6 +221,8 @@ class DatabaseService {
             SELECT 
               c.cluster_id,
               c.cluster_label,
+              c.cluster_insights,
+              c.cluster_analysis,
               c.avg_similarity,
               c.is_outlier_bucket,
               COUNT(p.id) as problem_count,
@@ -244,10 +246,12 @@ class DatabaseService {
             SELECT 
               c.cluster_id,
               c.cluster_label,
+              c.cluster_insights,
+              c.cluster_analysis,
               c.avg_similarity,
               c.is_outlier_bucket,
               c.created_at,
-              COUNT(p.id) as problem_count,
+              COUNT(DISTINCT p.id) as problem_count,
               COUNT(DISTINCT s.id) as solution_count
             FROM dreamteam.cluster_centroids c
             LEFT JOIN dreamteam.problems p ON p.cluster_id = c.cluster_id
@@ -259,7 +263,7 @@ class DatabaseService {
       
       // Add GROUP BY first
       baseQuery += `
-            GROUP BY c.cluster_id, c.cluster_label, 
+            GROUP BY c.cluster_id, c.cluster_label, c.cluster_insights, c.cluster_analysis,
                      c.avg_similarity, c.is_outlier_bucket, c.created_at
       `;
       
@@ -793,6 +797,8 @@ class DatabaseService {
         SELECT 
           c.cluster_id,
           c.cluster_label,
+          c.cluster_insights,
+          c.cluster_analysis,
           c.avg_similarity,
           c.is_outlier_bucket,
           c.created_at,
@@ -802,7 +808,8 @@ class DatabaseService {
         LEFT JOIN dreamteam.solutions s ON s.solution_cluster_id = c.cluster_id
         WHERE c.cluster_id = $1
           AND c.version = (SELECT version FROM active_version)
-        GROUP BY c.cluster_id, c.cluster_label, c.avg_similarity, c.is_outlier_bucket, c.created_at
+        GROUP BY c.cluster_id, c.cluster_label, c.cluster_insights, c.cluster_analysis, 
+                 c.avg_similarity, c.is_outlier_bucket, c.created_at
       `;
       
       const result = await pool.query(query, [clusterId]);
@@ -825,6 +832,8 @@ class DatabaseService {
             SELECT 
               c.cluster_id,
               c.cluster_label,
+              c.cluster_insights,
+              c.cluster_analysis,
               c.avg_similarity,
               c.is_outlier_bucket,
               COUNT(s.id) as solution_count,
@@ -846,6 +855,8 @@ class DatabaseService {
             SELECT 
               c.cluster_id,
               c.cluster_label,
+              c.cluster_insights,
+              c.cluster_analysis,
               c.avg_similarity,
               c.is_outlier_bucket,
               c.created_at,
@@ -859,7 +870,7 @@ class DatabaseService {
       
       // Add GROUP BY first
       baseQuery += `
-            GROUP BY c.cluster_id, c.cluster_label, 
+            GROUP BY c.cluster_id, c.cluster_label, c.cluster_insights, c.cluster_analysis,
                      c.avg_similarity, c.is_outlier_bucket, c.created_at
       `;
       

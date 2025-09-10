@@ -178,8 +178,258 @@ function StudyModeModal({ isOpen, onClose, initialEntity, entityType }) {
             )}
           </div>
 
-          {/* Cluster Description */}
-          {currentEntity.is_outlier_bucket && (
+          {/* Cluster Insights and Analysis */}
+          {currentEntity.cluster_insights && (
+            <div className="bg-blue-50 p-6 rounded-lg border-l-4 border-blue-400">
+              <h4 className="font-semibold text-blue-900 mb-3">Cluster Insights</h4>
+              <p className="text-blue-800 leading-relaxed">
+                {currentEntity.cluster_insights}
+              </p>
+            </div>
+          )}
+
+          {/* Comprehensive Cluster Analysis */}
+          {currentEntity.cluster_analysis && (
+            <div className="space-y-6">
+              {/* Check if this is a solution cluster and render appropriate fields */}
+              {currentType === 'solutionCluster' ? (
+                <>
+                  {/* Solution Cluster Patterns */}
+                  {currentEntity.cluster_analysis.patterns && (
+                    <div className="bg-white p-6 rounded-lg border border-gray-200">
+                      <h4 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <span className="text-purple-600">🔍</span> Key Patterns
+                      </h4>
+                      <div className="flex flex-wrap gap-2">
+                        {currentEntity.cluster_analysis.patterns.map((pattern, idx) => (
+                          <span key={idx} className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
+                            {pattern}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Target Market & Core Capabilities */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {currentEntity.cluster_analysis.target_market && (
+                      <div className="bg-blue-50 p-6 rounded-lg border border-blue-200">
+                        <h4 className="font-semibold text-blue-900 mb-4 flex items-center gap-2">
+                          <span>🎯</span> Target Market
+                        </h4>
+                        <ul className="space-y-2">
+                          {currentEntity.cluster_analysis.target_market.map((market, idx) => (
+                            <li key={idx} className="flex items-start">
+                              <span className="text-blue-400 mr-2 mt-0.5">•</span>
+                              <span className="text-blue-800">{market}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {currentEntity.cluster_analysis.core_capabilities && (
+                      <div className="bg-green-50 p-6 rounded-lg border border-green-200">
+                        <h4 className="font-semibold text-green-900 mb-4 flex items-center gap-2">
+                          <span>⚡</span> Core Capabilities
+                        </h4>
+                        <ul className="space-y-2">
+                          {currentEntity.cluster_analysis.core_capabilities.map((capability, idx) => (
+                            <li key={idx} className="flex items-start">
+                              <span className="text-green-400 mr-2 mt-0.5">•</span>
+                              <span className="text-green-800">{capability}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Business Model & Competitive Advantage */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {currentEntity.cluster_analysis.business_model && (
+                      <div className="bg-yellow-50 p-6 rounded-lg border border-yellow-200">
+                        <h4 className="font-semibold text-yellow-900 mb-3 flex items-center gap-2">
+                          <span>💰</span> Business Model
+                        </h4>
+                        <p className="text-yellow-800 leading-relaxed">
+                          {currentEntity.cluster_analysis.business_model}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {currentEntity.cluster_analysis.competitive_advantage && (
+                      <div className="bg-purple-50 p-6 rounded-lg border border-purple-200">
+                        <h4 className="font-semibold text-purple-900 mb-3 flex items-center gap-2">
+                          <span>🏆</span> Competitive Advantage
+                        </h4>
+                        <p className="text-purple-800 leading-relaxed">
+                          {currentEntity.cluster_analysis.competitive_advantage}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Implementation & Revenue */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {currentEntity.cluster_analysis.implementation_complexity && (
+                      <div className="bg-orange-50 p-6 rounded-lg border border-orange-200">
+                        <h4 className="font-semibold text-orange-900 mb-3 flex items-center gap-2">
+                          <span>🔧</span> Implementation Complexity
+                        </h4>
+                        <p className="text-orange-800 leading-relaxed">
+                          {currentEntity.cluster_analysis.implementation_complexity}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {currentEntity.cluster_analysis.revenue_potential && (
+                      <div className="bg-indigo-50 p-6 rounded-lg border border-indigo-200">
+                        <h4 className="font-semibold text-indigo-900 mb-3 flex items-center gap-2">
+                          <span>📈</span> Revenue Potential
+                        </h4>
+                        <p className="text-indigo-800 leading-relaxed">
+                          {currentEntity.cluster_analysis.revenue_potential}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Representative Solutions */}
+                  {currentEntity.cluster_analysis.representative_solutions && currentEntity.cluster_analysis.representative_solutions.length > 0 && (
+                    <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
+                      <h4 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <span className="text-teal-600">🌟</span> Representative Solutions
+                      </h4>
+                      <div className="space-y-2">
+                        {currentEntity.cluster_analysis.representative_solutions.map((solution, idx) => (
+                          <div key={idx} className="bg-white p-3 rounded-lg border border-gray-200">
+                            <p className="text-gray-800">{solution}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* Problem Cluster Analysis - existing code */}
+                  {/* Common Patterns */}
+                  {currentEntity.cluster_analysis.common_patterns && (
+                <div className="bg-white p-6 rounded-lg border border-gray-200">
+                  <h4 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                    <span className="text-purple-600">🔍</span> Common Patterns
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {currentEntity.cluster_analysis.common_patterns.map((pattern, idx) => (
+                      <span key={idx} className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
+                        {pattern}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Business Impact & Market Opportunity */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {currentEntity.cluster_analysis.business_impact && (
+                  <div className="bg-yellow-50 p-6 rounded-lg border border-yellow-200">
+                    <h4 className="font-semibold text-yellow-900 mb-3 flex items-center gap-2">
+                      <span>💼</span> Business Impact
+                    </h4>
+                    <p className="text-yellow-800 leading-relaxed">
+                      {currentEntity.cluster_analysis.business_impact}
+                    </p>
+                  </div>
+                )}
+                
+                {currentEntity.cluster_analysis.market_opportunity && (
+                  <div className="bg-green-50 p-6 rounded-lg border border-green-200">
+                    <h4 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
+                      <span>📈</span> Market Opportunity
+                    </h4>
+                    <p className="text-green-800 leading-relaxed">
+                      {currentEntity.cluster_analysis.market_opportunity}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Stakeholders & Root Causes */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {currentEntity.cluster_analysis.affected_stakeholders && (
+                  <div className="bg-white p-6 rounded-lg border border-gray-200">
+                    <h4 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <span className="text-blue-600">👥</span> Affected Stakeholders
+                    </h4>
+                    <ul className="space-y-2">
+                      {currentEntity.cluster_analysis.affected_stakeholders.map((stakeholder, idx) => (
+                        <li key={idx} className="flex items-start">
+                          <span className="text-gray-400 mr-2 mt-0.5">•</span>
+                          <span className="text-gray-700">{stakeholder}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {currentEntity.cluster_analysis.root_causes && (
+                  <div className="bg-white p-6 rounded-lg border border-gray-200">
+                    <h4 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <span className="text-red-600">🎯</span> Root Causes
+                    </h4>
+                    <ul className="space-y-2">
+                      {currentEntity.cluster_analysis.root_causes.map((cause, idx) => (
+                        <li key={idx} className="flex items-start">
+                          <span className="text-gray-400 mr-2 mt-0.5">•</span>
+                          <span className="text-gray-700">{cause}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Solution Themes */}
+              {currentEntity.cluster_analysis.solution_themes && (
+                <div className="bg-indigo-50 p-6 rounded-lg border border-indigo-200">
+                  <h4 className="font-semibold text-indigo-900 mb-4 flex items-center gap-2">
+                    <span>💡</span> Solution Themes
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {currentEntity.cluster_analysis.solution_themes.map((theme, idx) => (
+                      <div key={idx} className="flex items-center">
+                        <span className="text-green-500 mr-2">✓</span>
+                        <span className="text-indigo-800">{theme}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Representative Problems */}
+              {currentEntity.cluster_analysis.representative_problems && currentEntity.cluster_analysis.representative_problems.length > 0 && (
+                <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
+                  <h4 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                    <span className="text-orange-600">📌</span> Representative Problems
+                  </h4>
+                  <div className="space-y-3">
+                    {currentEntity.cluster_analysis.representative_problems.map((problem, idx) => (
+                      <div key={idx} className="bg-white p-4 rounded-lg border border-gray-200">
+                        <p className="font-medium text-gray-900 mb-2">{problem.title}</p>
+                        <p className="text-sm text-gray-600 italic">{problem.why_representative}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Outlier Bucket Description - Keep existing for outliers */}
+          {currentEntity.is_outlier_bucket && !currentEntity.cluster_insights && (
             <div className="bg-yellow-50 p-6 rounded-lg border border-yellow-200">
               <h4 className="font-semibold text-yellow-900 mb-3">About the Outlier Bucket</h4>
               <p className="text-yellow-800 leading-relaxed">

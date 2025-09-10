@@ -298,6 +298,65 @@ router.post('/workflows/f4/trigger', async (req, res) => {
   }
 });
 
+// === DEBUG SOLUTION CLUSTERS ===
+router.get('/debug/solution-source-clusters', async (req, res) => {
+  try {
+    // Check if solutions have source_cluster_id
+    const solutionCheck = await databaseService.executeQuery(`
+      SELECT 
+        COUNT(*) as total_solutions,
+        COUNT(source_cluster_id) as solutions_with_cluster,
+        COUNT(*) - COUNT(source_cluster_id) as solutions_without_cluster
+      FROM dreamteam.solutions
+    `);
+    
+    // Check what the getClusters query returns
+    const clusterCounts = await databaseService.executeQuery(`
+      WITH active_version AS (
+        SELECT COALESCE(
+          (SELECT version FROM dreamteam.cluster_versions WHERE is_active = true),
+          (SELECT MAX(version) FROM dreamteam.cluster_centroids)
+        ) as version
+      ),
+      cluster_data AS (
+        SELECT 
+          c.cluster_id,
+          c.cluster_label,
+          COUNT(DISTINCT p.id) as problem_count,
+          COUNT(DISTINCT s.id) as solution_count
+        FROM dreamteam.cluster_centroids c
+        LEFT JOIN dreamteam.problems p ON p.cluster_id = c.cluster_id
+        LEFT JOIN dreamteam.solutions s ON s.source_cluster_id = c.cluster_id
+        WHERE c.version = (SELECT version FROM active_version)
+        GROUP BY c.cluster_id, c.cluster_label
+      )
+      SELECT * FROM cluster_data
+      WHERE solution_count > 0
+      ORDER BY solution_count DESC
+    `);
+    
+    // Sample solutions
+    const sampleSolutions = await databaseService.executeQuery(`
+      SELECT 
+        id,
+        title,
+        source_cluster_id,
+        source_cluster_label,
+        created_at
+      FROM dreamteam.solutions
+      LIMIT 10
+    `);
+    
+    res.json({
+      solutionStats: solutionCheck[0] || {},
+      clustersWithSolutions: clusterCounts || [],
+      sampleSolutions: sampleSolutions || []
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // === HEALTH CHECK ===
 router.get('/health', async (req, res) => {
   try {

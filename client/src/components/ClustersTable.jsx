@@ -229,6 +229,12 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, is
                   ? '⚠️ Outlier Bucket' 
                   : cluster.cluster_label}
               </span>
+              {/* Show indicator if cluster has insights */}
+              {cluster.cluster_analysis && !cluster.is_outlier_bucket && (
+                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title="Rich analysis available">
+                  🎯 Analyzed
+                </span>
+              )}
               <div className="flex gap-2 mt-1 flex-wrap">
                 {entityType === 'problem' && cluster.problem_count > 0 && (
                   <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
@@ -324,6 +330,222 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, is
         <tr>
           <td colSpan={visibleColumns.length + 1} className="px-6 py-0">
             <div className="bg-gradient-to-r from-purple-50 to-indigo-50 p-4 mb-4 rounded">
+              {/* Cluster Insights Section - Show if available */}
+              {(cluster.cluster_insights || cluster.cluster_analysis) && (
+                <div className="mb-6 bg-white rounded-lg p-4 shadow-sm">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    🎯 Cluster Analysis
+                  </h3>
+                  
+                  {/* Insights Summary */}
+                  {cluster.cluster_insights && cluster.cluster_insights !== 'Cluster insights pending analysis' && (
+                    <div className="mb-4 p-3 bg-blue-50 rounded-lg border-l-4 border-blue-400">
+                      <p className="text-sm text-gray-700 leading-relaxed">{cluster.cluster_insights}</p>
+                    </div>
+                  )}
+                  
+                  {/* Detailed Analysis */}
+                  {cluster.cluster_analysis && (
+                    <div className="space-y-4">
+                      {entityType === 'solution' ? (
+                        <>
+                          {/* Solution Cluster Analysis */}
+                          {/* Patterns */}
+                          {cluster.cluster_analysis.patterns && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-2">Key Patterns</h4>
+                              <div className="flex flex-wrap gap-2">
+                                {cluster.cluster_analysis.patterns.map((pattern, idx) => (
+                                  <span key={idx} className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                    {pattern}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Target Market & Core Capabilities */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {cluster.cluster_analysis.target_market && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-2">Target Market</h4>
+                                <ul className="space-y-1">
+                                  {cluster.cluster_analysis.target_market.map((market, idx) => (
+                                    <li key={idx} className="text-sm text-gray-600 flex items-start">
+                                      <span className="text-blue-400 mr-2">•</span>
+                                      {market}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            
+                            {cluster.cluster_analysis.core_capabilities && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-2">Core Capabilities</h4>
+                                <ul className="space-y-1">
+                                  {cluster.cluster_analysis.core_capabilities.map((capability, idx) => (
+                                    <li key={idx} className="text-sm text-gray-600 flex items-start">
+                                      <span className="text-green-400 mr-2">•</span>
+                                      {capability}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Business Model & Competitive Advantage */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {cluster.cluster_analysis.business_model && (
+                              <div className="p-3 bg-yellow-50 rounded-lg">
+                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Business Model</h4>
+                                <p className="text-sm text-gray-600">{cluster.cluster_analysis.business_model}</p>
+                              </div>
+                            )}
+                            
+                            {cluster.cluster_analysis.competitive_advantage && (
+                              <div className="p-3 bg-purple-50 rounded-lg">
+                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Competitive Advantage</h4>
+                                <p className="text-sm text-gray-600">{cluster.cluster_analysis.competitive_advantage}</p>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Implementation & Revenue */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {cluster.cluster_analysis.implementation_complexity && (
+                              <div className="p-3 bg-orange-50 rounded-lg">
+                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Implementation Complexity</h4>
+                                <p className="text-sm text-gray-600">{cluster.cluster_analysis.implementation_complexity}</p>
+                              </div>
+                            )}
+                            
+                            {cluster.cluster_analysis.revenue_potential && (
+                              <div className="p-3 bg-green-50 rounded-lg">
+                                <h4 className="text-sm font-semibold text-gray-700 mb-1">Revenue Potential</h4>
+                                <p className="text-sm text-gray-600">{cluster.cluster_analysis.revenue_potential}</p>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Representative Solutions */}
+                          {cluster.cluster_analysis.representative_solutions && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-700 mb-2">Representative Solutions</h4>
+                              <div className="space-y-2">
+                                {cluster.cluster_analysis.representative_solutions.map((solution, idx) => (
+                                  <div key={idx} className="p-2 bg-blue-50 rounded text-sm text-gray-700">
+                                    {solution}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {/* Problem Cluster Analysis - existing code */}
+                          {/* Common Patterns */}
+                          {cluster.cluster_analysis.common_patterns && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Common Patterns</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {cluster.cluster_analysis.common_patterns.map((pattern, idx) => (
+                              <span key={idx} className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                {pattern}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Two Column Grid for Other Info */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Affected Stakeholders */}
+                        {cluster.cluster_analysis.affected_stakeholders && (
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-2">Affected Stakeholders</h4>
+                            <ul className="space-y-1">
+                              {cluster.cluster_analysis.affected_stakeholders.map((stakeholder, idx) => (
+                                <li key={idx} className="text-sm text-gray-600 flex items-start">
+                                  <span className="text-gray-400 mr-2">•</span>
+                                  {stakeholder}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        
+                        {/* Root Causes */}
+                        {cluster.cluster_analysis.root_causes && (
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-2">Root Causes</h4>
+                            <ul className="space-y-1">
+                              {cluster.cluster_analysis.root_causes.map((cause, idx) => (
+                                <li key={idx} className="text-sm text-gray-600 flex items-start">
+                                  <span className="text-gray-400 mr-2">•</span>
+                                  {cause}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Business Impact & Market Opportunity */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {cluster.cluster_analysis.business_impact && (
+                          <div className="p-3 bg-yellow-50 rounded-lg">
+                            <h4 className="text-sm font-semibold text-gray-700 mb-1">Business Impact</h4>
+                            <p className="text-sm text-gray-600">{cluster.cluster_analysis.business_impact}</p>
+                          </div>
+                        )}
+                        
+                        {cluster.cluster_analysis.market_opportunity && (
+                          <div className="p-3 bg-green-50 rounded-lg">
+                            <h4 className="text-sm font-semibold text-gray-700 mb-1">Market Opportunity</h4>
+                            <p className="text-sm text-gray-600">{cluster.cluster_analysis.market_opportunity}</p>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Solution Themes */}
+                      {cluster.cluster_analysis.solution_themes && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Solution Themes</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {cluster.cluster_analysis.solution_themes.map((theme, idx) => (
+                              <div key={idx} className="flex items-center text-sm text-gray-600">
+                                <span className="text-green-500 mr-2">✓</span>
+                                {theme}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Representative Problems */}
+                      {cluster.cluster_analysis.representative_problems && cluster.cluster_analysis.representative_problems.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Representative Problems</h4>
+                          <div className="space-y-2">
+                            {cluster.cluster_analysis.representative_problems.map((problem, idx) => (
+                              <div key={idx} className="p-2 bg-gray-50 rounded">
+                                <p className="text-sm font-medium text-gray-800">{problem.title}</p>
+                                <p className="text-xs text-gray-600 mt-1 italic">{problem.why_representative}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Problems Section - Only show for problem clusters */}
                 {entityType === 'problem' && (
