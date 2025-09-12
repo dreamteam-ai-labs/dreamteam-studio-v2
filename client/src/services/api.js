@@ -53,6 +53,7 @@ export const getSolutionsByCluster = (clusterId) => api.get('/solutions', { para
 export const getSolutionsBySolutionCluster = (clusterId) => api.get(`/solution-clusters/${clusterId}/solutions`);
 export const getSolutionsByProblem = (problemId) => api.get(`/problems/${problemId}/solutions`);
 export const getBestSolutionCandidate = () => api.get('/solutions/best-candidate');
+export const createProductFromSolution = (solutionId) => api.post(`/solutions/${solutionId}/create-product`);
 
 // Projects
 export const getProjects = () => api.get('/projects');

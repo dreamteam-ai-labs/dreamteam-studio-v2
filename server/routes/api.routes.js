@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import fetch from 'node-fetch';
 import databaseService from '../services/database.service.js';
 import n8nService from '../services/n8n.service.js';
 
@@ -507,6 +508,74 @@ router.post('/clustering-scenarios/:id/apply', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('Error applying scenario to production:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === PRODUCT CREATION ===
+router.post('/solutions/:id/create-product', async (req, res) => {
+  try {
+    const solutionId = req.params.id;
+    console.log('Creating product for solution:', solutionId);
+    
+    // First check if solution exists and doesn't already have a project
+    const solution = await databaseService.getSolutionById(solutionId);
+    if (!solution) {
+      console.error('Solution not found:', solutionId);
+      return res.status(404).json({ error: 'Solution not found' });
+    }
+    
+    if (solution.linear_project_id) {
+      console.log('Solution already has a project:', solution.linear_project_id);
+      return res.status(400).json({ error: 'Solution already has a project' });
+    }
+    
+    // Trigger n8n webhook for F4-Create-Product-V2
+    console.log('ENV N8N_F4_WEBHOOK_URL:', process.env.N8N_F4_WEBHOOK_URL);
+    const webhookUrl = process.env.N8N_F4_WEBHOOK_URL || 'http://localhost:5678/webhook/f4-create-product';
+    console.log('Triggering webhook:', webhookUrl);
+    
+    const webhookData = {
+      solution_id: solutionId,
+      triggered_by: 'ui_manual',
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log('Webhook payload:', webhookData);
+    
+    let response;
+    try {
+      response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(webhookData)
+      });
+      
+      console.log('Webhook response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Webhook error response:', errorText);
+        throw new Error(`n8n webhook failed: ${response.statusText} - ${errorText}`);
+      }
+    } catch (fetchError) {
+      if (fetchError.code === 'ECONNREFUSED') {
+        console.error('n8n is not running or webhook not configured');
+        throw new Error('Product creation service is not available. Please ensure n8n is running and the webhook is configured.');
+      }
+      throw fetchError;
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Product creation initiated',
+      solution_id: solutionId 
+    });
+  } catch (error) {
+    console.error('Error triggering product creation - Full error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ error: error.message });
   }
 });

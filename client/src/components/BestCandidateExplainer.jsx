@@ -5,15 +5,20 @@ function BestCandidateExplainer({ solution }) {
   
   if (!solution) return null;
   
-  // Calculate the scoring breakdown
+  // Use the actual database score and reverse-engineer the components
+  const totalScore = parseFloat(solution.candidate_score || solution.selection_score || 0);
+  
+  // Calculate what the components SHOULD be based on the formula
   const ltv_cac_ratio = solution.ltv_estimate && solution.cac_estimate 
-    ? (solution.ltv_estimate / solution.cac_estimate).toFixed(2)
+    ? parseFloat(solution.ltv_estimate) / parseFloat(solution.cac_estimate)
     : 0;
   
-  const viabilityScore = (solution.overall_viability || 0) * 0.4;
+  const viabilityScore = (parseFloat(solution.overall_viability) || 0) * 0.4;
   const ltvcacScore = Math.min(ltv_cac_ratio * 5, 50) * 0.3;
-  const problemScore = (solution.problem_count || 0) * 2 * 0.3;
-  const totalScore = viabilityScore + ltvcacScore + problemScore;
+  const problemScore = (parseInt(solution.problem_count) || 0) * 2 * 0.3;
+  
+  // Note: If components don't add up to totalScore, it means the database
+  // calculated differently (possibly due to data changes after calculation)
   
   return (
     <div className="bg-gradient-to-r from-yellow-50 to-amber-50 rounded-lg p-4 border-2 border-yellow-400">
@@ -95,9 +100,9 @@ function BestCandidateExplainer({ solution }) {
                 <span className="text-sm font-bold">{ltvcacScore.toFixed(1)} pts</span>
               </div>
               <div className="text-xs text-gray-600">
-                £{solution.ltv_estimate || 0} ÷ £{solution.cac_estimate || 0} = {ltv_cac_ratio}:1 ratio
+                £{solution.ltv_estimate || 0} ÷ £{solution.cac_estimate || 0} = {ltv_cac_ratio.toFixed(2)}:1 ratio
                 <br />
-                Min({ltv_cac_ratio} × 5, 50) × 30% weight = {ltvcacScore.toFixed(1)}
+                Min({ltv_cac_ratio.toFixed(2)} × 5, 50) × 30% weight = {ltvcacScore.toFixed(1)}
               </div>
               <div className="mt-2 bg-gray-200 rounded-full h-2">
                 <div 

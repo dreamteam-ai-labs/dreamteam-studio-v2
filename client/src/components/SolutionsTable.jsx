@@ -1,6 +1,6 @@
 import { useState, useCallback, memo, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getSolutions, getProblemsBySolution, getProblemsByCluster, getSolutionsFilterOptions, getBestSolutionCandidate } from '../services/api';
+import { getSolutions, getProblemsBySolution, getProblemsByCluster, getSolutionsFilterOptions, getBestSolutionCandidate, createProductFromSolution } from '../services/api';
 import { formatDateTime, isNewItem } from '../utils/dateUtils';
 import { formatLargeCurrency, formatPercentage } from '../utils/numberUtils';
 import SearchInput from './SearchInput';
@@ -144,7 +144,7 @@ const FiltersSection = memo(function FiltersSection({
 });
 
 // Solution row component for expandable functionality
-function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTogglePin, isSelected, onToggleSelect, onStudy, isNew, isFlashing }) {
+function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTogglePin, isSelected, onToggleSelect, onStudy, onCreateProduct, isNew, isFlashing }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Get problems directly linked to solution
@@ -305,7 +305,7 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
             {formatDateTime(solution.created_at)}
           </td>
         )}
-        <td className="px-3 py-4 text-center" style={{ width: '100px' }}>
+        <td className="px-3 py-4 text-center" style={{ width: '150px' }}>
           <div className="flex gap-1 justify-center">
             <button
               onClick={(e) => {
@@ -333,6 +333,34 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+              </svg>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (solution.linear_project_id) {
+                  if (window.confirm(`This solution already has a project. Create another one?`)) {
+                    onCreateProduct(solution);
+                  }
+                } else {
+                  onCreateProduct(solution);
+                }
+              }}
+              className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
+                solution.linear_project_id 
+                  ? 'text-amber-500 hover:text-amber-700 hover:bg-amber-100' 
+                  : 'text-green-500 hover:text-green-700 hover:bg-green-100'
+              }`}
+              title={solution.linear_project_id 
+                ? "Solution already has a project - click to create another" 
+                : "Create product from this solution"
+              }
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d={solution.linear_project_id 
+                  ? "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"
+                  : "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"
+                }/>
               </svg>
             </button>
           </div>
@@ -567,6 +595,19 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
     setStudyEntity(entity);
     setStudyEntityType(type);
     setStudyModalOpen(true);
+  };
+
+  const handleCreateProduct = async (solution) => {
+    if (window.confirm(`Create a product from "${solution.title}"?\n\nThis will trigger the F4 workflow to create:\n- GitHub repository\n- Linear project\n- Complete product setup`)) {
+      try {
+        await createProductFromSolution(solution.id);
+        alert('Product creation initiated! Check Linear and GitHub in a few minutes.');
+        // Refresh solutions to update the UI
+        await refetchSolutions();
+      } catch (error) {
+        alert(`Failed to create product: ${error.message}`);
+      }
+    }
   };
   
   // Save column preferences when they change
@@ -939,6 +980,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                     isSelected={selectedItems.has(solution.id)}
                     onToggleSelect={() => handleSelectItem(solution.id)}
                     onStudy={openStudyMode}
+                    onCreateProduct={handleCreateProduct}
                     isNew={newItemIds.has(solution.id)}
                     isFlashing={flashItemIds.has(solution.id)}
                   />
@@ -963,6 +1005,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                     isSelected={selectedItems.has(solution.id)}
                     onToggleSelect={() => handleSelectItem(solution.id)}
                     onStudy={openStudyMode}
+                    onCreateProduct={handleCreateProduct}
                     isNew={newItemIds.has(solution.id)}
                     isFlashing={flashItemIds.has(solution.id)}
                   />

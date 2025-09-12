@@ -119,6 +119,20 @@ class DatabaseService {
     return result.rows;
   }
 
+  async getSolutionById(solutionId) {
+    const query = `
+      SELECT 
+        s.*,
+        COUNT(DISTINCT psm.problem_id) as problem_count
+      FROM dreamteam.solutions s
+      LEFT JOIN dreamteam.problem_solution_map psm ON s.id = psm.solution_id
+      WHERE s.id = $1
+      GROUP BY s.id
+    `;
+    const result = await pool.query(query, [solutionId]);
+    return result.rows[0];
+  }
+
   async checkClusterExists(clusterId) {
     try {
       // Check if any problems are assigned to this cluster
