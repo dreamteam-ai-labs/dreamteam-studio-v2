@@ -187,6 +187,7 @@ export const TAB_COLUMNS = {
     { key: 'name', label: 'Project Name', required: true, sortable: false },
     { key: 'github', label: 'GitHub Repository', required: false, sortable: false },
     { key: 'linear', label: 'Linear Project', required: false, sortable: false },
+    { key: 'codespace', label: 'Codespaces', required: false, sortable: false },
     { key: 'viability', label: 'Viability Score', required: false, sortable: false },
     { key: 'status', label: 'Status', required: false, sortable: false },
     { key: 'created', label: 'Created', required: false, sortable: true },

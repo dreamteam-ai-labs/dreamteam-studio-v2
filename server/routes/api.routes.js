@@ -2,6 +2,7 @@ import { Router } from 'express';
 import fetch from 'node-fetch';
 import databaseService from '../services/database.service.js';
 import n8nService from '../services/n8n.service.js';
+import codespaceService from '../services/codespace.service.js';
 
 const router = Router();
 
@@ -226,6 +227,109 @@ router.get('/projects', async (req, res) => {
   try {
     const projects = await databaseService.getProjects();
     res.json(projects);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create Codespace for a project
+router.post('/projects/:id/create-codespace', async (req, res) => {
+
+  try {
+    const { id } = req.params;
+
+    // Get project details
+    const projects = await databaseService.getProjects();
+    const project = projects.find(p => p.id === id);
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    if (!project.github_repo_url) {
+      return res.status(400).json({ error: 'Project has no GitHub repository' });
+    }
+
+    if (project.codespace_url) {
+      return res.status(400).json({ error: 'Codespace already exists for this project' });
+    }
+
+    // Extract repo name from URL
+    const repoName = project.github_repo_url.replace('https://github.com/', '');
+
+    // Create the Codespace
+    const result = await codespaceService.createCodespace(id, repoName);
+    res.json(result);
+  } catch (error) {
+    console.error('Error creating Codespace:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get Codespace status for a project
+router.get('/projects/:id/codespace-status', async (req, res) => {
+
+  try {
+    const { id } = req.params;
+
+    // Get project details
+    const projects = await databaseService.getProjects();
+    const project = projects.find(p => p.id === id);
+
+    if (!project || !project.codespace_url) {
+      return res.status(404).json({ error: 'No Codespace found for this project' });
+    }
+
+    // Extract Codespace ID from URL if needed
+    const codespaceId = codespaceService.extractCodespaceId(project.codespace_url);
+    if (!codespaceId) {
+      return res.json({ state: 'unknown', url: project.codespace_url });
+    }
+
+    const status = await codespaceService.getCodespaceStatus(codespaceId);
+
+    if (status.state === 'deleted') {
+      await codespaceService.updateProjectCodespace(id, null, null);
+      return res.status(404).json({ error: 'Codespace not found', state: 'deleted' });
+    }
+
+    if (status.url && status.url !== project.codespace_url) {
+      await codespaceService.updateProjectCodespace(id, status.url, status.state);
+    }
+
+    res.json(status);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete Codespace for a project
+router.delete('/projects/:id/codespace', async (req, res) => {
+
+  try {
+    const { id } = req.params;
+    const { codespaceId } = req.body;
+
+    if (!codespaceId) {
+      return res.status(400).json({ error: 'Codespace ID required' });
+    }
+
+    const result = await codespaceService.deleteCodespace(id, codespaceId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Clear Codespace URL for a project (when manually deleted from GitHub)
+router.post('/projects/:id/clear-codespace', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Clear the codespace URL from database
+    await codespaceService.updateProjectCodespace(id, null, null);
+
+    res.json({ success: true, message: 'Codespace URL cleared' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

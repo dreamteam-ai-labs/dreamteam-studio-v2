@@ -5,12 +5,14 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import apiRoutes from './routes/api.routes.js';
 
-// Load environment variables
-dotenv.config();
-
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Load environment variables
+// First try parent directory (dreamteam/.env), then local (studio-v2/.env)
+dotenv.config({ path: join(__dirname, '../../.env') });
+dotenv.config(); // Also load local .env to override if needed
 
 // Create Express app
 const app = express();

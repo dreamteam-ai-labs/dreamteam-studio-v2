@@ -664,7 +664,7 @@ class DatabaseService {
   async getProjects() {
     try {
       const query = `
-        SELECT 
+        SELECT
           p.id,
           p.identifier,
           p.name,
@@ -679,6 +679,9 @@ class DatabaseService {
           p.linear_project_id,
           p.linear_project_url,
           p.linear_created_at,
+          p.codespace_url,
+          p.codespace_status,
+          p.codespace_created_at,
           p.created_at,
           s.title as solution_title,
           s.description as solution_description,

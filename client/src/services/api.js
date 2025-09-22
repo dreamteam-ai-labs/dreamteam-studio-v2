@@ -57,6 +57,9 @@ export const createProductFromSolution = (solutionId) => api.post(`/solutions/${
 
 // Projects
 export const getProjects = () => api.get('/projects');
+export const createCodespace = (projectId) => api.post(`/projects/${projectId}/create-codespace`);
+export const getCodespaceStatus = (projectId) => api.get(`/projects/${projectId}/codespace-status`);
+export const deleteCodespace = (projectId, codespaceId) => api.delete(`/projects/${projectId}/codespace`, { data: { codespaceId } });
 
 // Pipeline
 export const getPipelineStats = () => api.get('/pipeline/stats');

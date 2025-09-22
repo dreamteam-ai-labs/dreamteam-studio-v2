@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, memo, useMemo, useRef } from 'react';
+﻿import { useState, useEffect, useCallback, memo, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getProjects, getSolutions, getProblemsBySolution, getProblemsByCluster } from '../services/api';
+import { getProjects, getSolutions, getProblemsBySolution, getProblemsByCluster, createCodespace } from '../services/api';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
 import { useTableFeatures } from '../hooks/useTableFeatures';
@@ -11,6 +11,29 @@ import '../styles/tables.css';
 // Use centralized column definitions
 const ALL_COLUMNS = TAB_COLUMNS.projects;
 const DEFAULT_COLUMNS = DEFAULT_VISIBLE_COLUMNS.projects;
+
+// Codespace cell component - simplified to only show existing codespaces
+function CodespaceCell({ project }) {
+  // If Codespace exists, show link to open it
+  if (project.codespace_url) {
+    return (
+      <a
+        href={project.codespace_url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm text-primary-600 hover:text-primary-700 font-medium inline-flex items-center gap-1"
+      >
+        Open VS Code
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+        </svg>
+      </a>
+    );
+  }
+
+  // No codespace created yet - leave blank
+  return null;
+}
 
 // Project row component with full journey view
 function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
@@ -37,7 +60,7 @@ function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
           <td className="px-4 py-3" style={{ minWidth: '350px' }}>
             <div className="flex items-start gap-2">
               <span className="text-gray-400 mt-0.5">
-                {isExpanded ? '▼' : '▶'}
+                {isExpanded ? 'â–¼' : 'â–¶'}
               </span>
               <div>
                 <p className="text-sm font-medium text-gray-900">
@@ -103,6 +126,11 @@ function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
             ) : (
               <span className="text-sm text-gray-400">No Linear project</span>
             )}
+          </td>
+        )}
+        {visibleColumns.includes('codespace') && (
+          <td className="px-4 py-3 text-center" style={{ width: '150px' }} onClick={(e) => e.stopPropagation()}>
+            <CodespaceCell project={project} />
           </td>
         )}
         {visibleColumns.includes('viability') && (
@@ -241,7 +269,7 @@ function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
                         <span className="text-gray-500">Revenue Potential:</span>
                         <span className="ml-1 text-gray-700">
                           {solution?.recurring_revenue_potential ? 
-                            `£${(solution.recurring_revenue_potential / 1000000).toFixed(1)}M` : 
+                            `Â£${(solution.recurring_revenue_potential / 1000000).toFixed(1)}M` : 
                             'Not specified'
                           }
                         </span>
@@ -257,7 +285,7 @@ function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
                     {/* Left: Cluster & Cluster Problems */}
                     <div>
                       <div className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                        📊 Source Cluster
+                        ðŸ“Š Source Cluster
                       </div>
                       {solution?.source_cluster_label ? (
                         <>
@@ -706,3 +734,10 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
 }
 
 export default ProjectsTable;
+
+
+
+
+
+
+
