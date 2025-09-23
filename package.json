@@ -12,8 +12,7 @@
     "build": "npm run client:build",
     "start": "npm run server:start",
     "setup": "npm install && cd client && npm install",
-    "install:all": "npm install && cd client && npm install && cd ..",
-    "build:render": "npm install && cd client && npm install && npm run build && cd .."
+    "postinstall": "cd client && npm install"
   },
   "dependencies": {
     "cors": "^2.8.5",
