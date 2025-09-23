@@ -60,7 +60,7 @@ function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
           <td className="px-4 py-3" style={{ minWidth: '350px' }}>
             <div className="flex items-start gap-2">
               <span className="text-gray-400 mt-0.5">
-                {isExpanded ? 'â–¼' : 'â–¶'}
+                {isExpanded ? '▼' : '▶'}
               </span>
               <div>
                 <p className="text-sm font-medium text-gray-900">
@@ -269,7 +269,7 @@ function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
                         <span className="text-gray-500">Revenue Potential:</span>
                         <span className="ml-1 text-gray-700">
                           {solution?.recurring_revenue_potential ? 
-                            `Â£${(solution.recurring_revenue_potential / 1000000).toFixed(1)}M` : 
+                            `£${(solution.recurring_revenue_potential / 1000000).toFixed(1)}M` : 
                             'Not specified'
                           }
                         </span>
