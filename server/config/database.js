@@ -1,13 +1,8 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Load .env from parent directory (studio-v2/)
-dotenv.config({ path: join(__dirname, '../../.env') });
+// Load .env from project root
+dotenv.config();
 
 const { Pool, types } = pg;
 
