@@ -9,7 +9,7 @@
     "client:dev": "cd client && npm run dev",
     "server:start": "node server/index.js",
     "client:build": "cd client && npm run build",
-    "build": "cd client && npm install && npm run build",
+    "build": "cd client && npm install --production=false && npm run build",
     "start": "npm run server:start",
     "setup": "npm install && cd client && npm install"
   },
