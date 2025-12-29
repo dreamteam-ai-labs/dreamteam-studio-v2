@@ -534,7 +534,7 @@ const SolutionRow = memo(function SolutionRow({ solution, visibleColumns, isBest
       )}
     </>
   );
-}
+});
 
 function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFiltered }) {
   // Use external filters if provided, otherwise use local state
@@ -782,6 +782,11 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
     return filtered;
   }, [allSolutions, searchTerm, externalFilters]);
 
+  // Memoize pinned/unpinned separation to avoid recalculating on every render
+  const { pinned: pinnedSolutions, unpinned: unpinnedSolutions } = useMemo(() => {
+    return separateEntities(solutions);
+  }, [solutions, separateEntities]);
+
   // Pass filtered data back to parent
   useEffect(() => {
     if (onDataFiltered) {
@@ -970,10 +975,10 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
             ) : (
               <>
                 {/* Pinned solutions first */}
-                {separateEntities(solutions).pinned.map((solution) => (
-                  <SolutionRow 
-                    key={solution.id} 
-                    solution={solution} 
+                {pinnedSolutions.map((solution) => (
+                  <SolutionRow
+                    key={solution.id}
+                    solution={solution}
                     visibleColumns={visibleColumns}
                     isBestCandidate={bestCandidate?.id === solution.id}
                     isPinned={true}
@@ -987,7 +992,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                   />
                 ))}
                 {/* Divider between pinned and unpinned */}
-                {separateEntities(solutions).pinned.length > 0 && separateEntities(solutions).unpinned.length > 0 && (
+                {pinnedSolutions.length > 0 && unpinnedSolutions.length > 0 && (
                   <tr className="bg-gray-100">
                     <td colSpan={visibleColumns.length + 2} className="px-6 py-2 text-xs text-gray-500 font-medium">
                       Other Solutions
@@ -995,7 +1000,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                   </tr>
                 )}
                 {/* Unpinned solutions - limited for performance */}
-                {separateEntities(solutions).unpinned.slice(0, displayLimit).map((solution) => (
+                {unpinnedSolutions.slice(0, displayLimit).map((solution) => (
                   <SolutionRow
                     key={solution.id}
                     solution={solution}
@@ -1012,14 +1017,14 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                   />
                 ))}
                 {/* Load More button */}
-                {separateEntities(solutions).unpinned.length > displayLimit && (
+                {unpinnedSolutions.length > displayLimit && (
                   <tr>
                     <td colSpan={visibleColumns.length + 2} className="px-6 py-4 text-center">
                       <button
                         onClick={() => setDisplayLimit(prev => prev + 50)}
                         className="px-4 py-2 bg-primary-500 text-white rounded-md hover:bg-primary-600 transition-colors"
                       >
-                        Load More ({separateEntities(solutions).unpinned.length - displayLimit} remaining)
+                        Load More ({unpinnedSolutions.length - displayLimit} remaining)
                       </button>
                     </td>
                   </tr>
