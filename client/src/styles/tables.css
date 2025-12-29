@@ -215,3 +215,9 @@
   white-space: nowrap;
   max-width: 100%;
 }
+
+/* Performance optimization: skip rendering off-screen rows */
+.data-table tbody tr {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 80px;
+}

@@ -143,8 +143,8 @@ const FiltersSection = memo(function FiltersSection({
   );
 });
 
-// Solution row component for expandable functionality
-function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTogglePin, isSelected, onToggleSelect, onStudy, onCreateProduct, isNew, isFlashing }) {
+// Solution row component for expandable functionality - memoized to prevent re-renders
+const SolutionRow = memo(function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTogglePin, isSelected, onToggleSelect, onStudy, onCreateProduct, isNew, isFlashing }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Get problems directly linked to solution
@@ -312,7 +312,7 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
                 e.stopPropagation();
                 onStudy(solution, 'solution');
               }}
-              className="p-2 rounded-lg transition-all transform hover:scale-110 text-purple-500 hover:text-purple-700 hover:bg-purple-100"
+              className="p-2 rounded-lg text-purple-500 hover:text-purple-700 hover:bg-purple-100"
               title="Study this solution"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -324,9 +324,9 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
                 e.stopPropagation();
                 onTogglePin(solution.id);
               }}
-              className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
-                isPinned 
-                  ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
+              className={`p-2 rounded-lg ${
+                isPinned
+                  ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
                   : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
               }`}
               title={isPinned ? 'Unpin' : 'Pin to top'}
@@ -346,9 +346,9 @@ function SolutionRow({ solution, visibleColumns, isBestCandidate, isPinned, onTo
                   onCreateProduct(solution);
                 }
               }}
-              className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
-                solution.linear_project_id 
-                  ? 'text-amber-500 hover:text-amber-700 hover:bg-amber-100' 
+              className={`p-2 rounded-lg ${
+                solution.linear_project_id
+                  ? 'text-amber-500 hover:text-amber-700 hover:bg-amber-100'
                   : 'text-green-500 hover:text-green-700 hover:bg-green-100'
               }`}
               title={solution.linear_project_id 
@@ -566,6 +566,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
   const [newItemIds, setNewItemIds] = useState(new Set());
   const [flashItemIds, setFlashItemIds] = useState(new Set());
   const previousDataRef = useRef(null);
+  const [displayLimit, setDisplayLimit] = useState(50); // Limit rows for performance
   
   // Selection handlers
   const handleSelectAll = (solutions) => {
@@ -993,11 +994,11 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                     </td>
                   </tr>
                 )}
-                {/* Unpinned solutions */}
-                {separateEntities(solutions).unpinned.map((solution) => (
-                  <SolutionRow 
-                    key={solution.id} 
-                    solution={solution} 
+                {/* Unpinned solutions - limited for performance */}
+                {separateEntities(solutions).unpinned.slice(0, displayLimit).map((solution) => (
+                  <SolutionRow
+                    key={solution.id}
+                    solution={solution}
                     visibleColumns={visibleColumns}
                     isBestCandidate={bestCandidate?.id === solution.id}
                     isPinned={false}
@@ -1010,6 +1011,19 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                     isFlashing={flashItemIds.has(solution.id)}
                   />
                 ))}
+                {/* Load More button */}
+                {separateEntities(solutions).unpinned.length > displayLimit && (
+                  <tr>
+                    <td colSpan={visibleColumns.length + 2} className="px-6 py-4 text-center">
+                      <button
+                        onClick={() => setDisplayLimit(prev => prev + 50)}
+                        className="px-4 py-2 bg-primary-500 text-white rounded-md hover:bg-primary-600 transition-colors"
+                      >
+                        Load More ({separateEntities(solutions).unpinned.length - displayLimit} remaining)
+                      </button>
+                    </td>
+                  </tr>
+                )}
               </>
             )}
           </tbody>

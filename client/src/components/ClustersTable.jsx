@@ -142,8 +142,8 @@ const FiltersSection = memo(function FiltersSection({
   );
 });
 
-// Cluster row component for expandable functionality
-function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, isFlashing, onStudy, isPinned, onTogglePin }) {
+// Cluster row component for expandable functionality - memoized to prevent re-renders
+const ClusterRow = memo(function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, isFlashing, onStudy, isPinned, onTogglePin }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [problemSort, setProblemSort] = useState({ field: 'impact', order: 'desc' });
   const [solutionSort, setSolutionSort] = useState({ field: 'viability', order: 'desc' });
@@ -333,7 +333,7 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, is
                 e.stopPropagation();
                 if (onStudy) onStudy(cluster);
               }}
-              className="p-2 rounded-lg transition-all transform hover:scale-110 text-purple-500 hover:text-purple-700 hover:bg-purple-100"
+              className="p-2 rounded-lg text-purple-500 hover:text-purple-700 hover:bg-purple-100"
               title="Study this cluster"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -345,9 +345,9 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, is
                 e.stopPropagation();
                 if (onTogglePin) onTogglePin(cluster.cluster_id);
               }}
-              className={`p-2 rounded-lg transition-all transform hover:scale-110 ${
-                isPinned 
-                  ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' 
+              className={`p-2 rounded-lg ${
+                isPinned
+                  ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
                   : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
               }`}
               title={isPinned ? 'Unpin' : 'Pin to top'}
@@ -731,7 +731,7 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, is
       )}
     </>
   );
-}
+});
 
 function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFiltered, entityType = 'problem', onStudy }) {
   // Use external filters if provided, otherwise use local state
@@ -739,6 +739,7 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [newItemIds, setNewItemIds] = useState(new Set());
   const [flashItemIds, setFlashItemIds] = useState(new Set());
+  const [displayLimit, setDisplayLimit] = useState(50); // Limit rows for performance
   const previousDataRef = useRef(null);
   const searchTerm = externalFilters?.searchTerm ?? localSearchTerm;
   
@@ -1157,11 +1158,11 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
                   </tr>
                 )}
                 
-                {/* Render unpinned clusters */}
-                {unpinnedClusters.map((cluster) => (
-                  <ClusterRow 
-                    key={cluster.cluster_id} 
-                    cluster={cluster} 
+                {/* Render unpinned clusters - limited for performance */}
+                {unpinnedClusters.slice(0, displayLimit).map((cluster) => (
+                  <ClusterRow
+                    key={cluster.cluster_id}
+                    cluster={cluster}
                     visibleColumns={visibleColumns}
                     entityType={entityType}
                     isNew={newItemIds.has(cluster.cluster_id)}
@@ -1171,6 +1172,19 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
                     onTogglePin={togglePin}
                   />
                 ))}
+                {/* Load More button */}
+                {unpinnedClusters.length > displayLimit && (
+                  <tr>
+                    <td colSpan={visibleColumns.length} className="px-6 py-4 text-center">
+                      <button
+                        onClick={() => setDisplayLimit(prev => prev + 50)}
+                        className="px-4 py-2 bg-primary-500 text-white rounded-md hover:bg-primary-600 transition-colors"
+                      >
+                        Load More ({unpinnedClusters.length - displayLimit} remaining)
+                      </button>
+                    </td>
+                  </tr>
+                )}
               </>
             )}
           </tbody>
