@@ -37,13 +37,14 @@ function EntityView({ entityType }) {
     title: '',
     description: '',
     cluster_label: '',
+    primary_industry: '',
     impact: [],
     industry: [],
     businessSize: [],
     solution_count: null,
     project_count: null,
     created_at: null,
-    
+
     // Cluster-specific filters (matching all 5 columns)
     problem_count: null,
     avg_similarity: null,
@@ -69,6 +70,13 @@ function EntityView({ entityType }) {
     // Pagination
     currentPage: 1,
     itemsPerPage: 20,
+  });
+
+  // Fetch cluster filter options (for industry dropdown)
+  const { data: clusterFilterOptions } = useQuery({
+    queryKey: ['clusters-filter-options'],
+    queryFn: () => getClustersFilterOptions(),
+    staleTime: 1000 * 60 * 10, // Cache for 10 minutes
   });
 
   // Calculate dynamic filter options from filtered data
@@ -172,6 +180,7 @@ function EntityView({ entityType }) {
       title: '',
       description: '',
       cluster_label: '',
+      primary_industry: '',
       impact: [],
       industry: [],
       businessSize: [],
@@ -268,6 +277,7 @@ function EntityView({ entityType }) {
       title: '',
       description: '',
       cluster_label: '',
+      primary_industry: '',
       impact: [],
       industry: [],
       businessSize: [],
@@ -600,6 +610,21 @@ function EntityView({ entityType }) {
                     placeholder="Filter by label"
                     className="text-sm border rounded px-2 py-1"
                   />
+                </div>
+
+                {/* Industry Filter */}
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-500 mb-1">Industry</label>
+                  <select
+                    value={filters.primary_industry || ''}
+                    onChange={(e) => setFilters(prev => ({ ...prev, primary_industry: e.target.value }))}
+                    className="text-sm border rounded px-2 py-1"
+                  >
+                    <option value="">All Industries</option>
+                    {clusterFilterOptions?.industries?.map(industry => (
+                      <option key={industry} value={industry}>{industry}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Problem Count Filter - Hide for solution clusters */}

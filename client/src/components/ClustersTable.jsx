@@ -16,14 +16,15 @@ const ALL_COLUMNS = TAB_COLUMNS.clusters;
 const DEFAULT_COLUMNS = DEFAULT_VISIBLE_COLUMNS.clusters;
 
 // Memoized filters section
-const FiltersSection = memo(function FiltersSection({ 
+const FiltersSection = memo(function FiltersSection({
   searchTerm,
-  onSearchChange, 
-  apiFilters, 
-  onFilterChange, 
+  onSearchChange,
+  apiFilters,
+  onFilterChange,
   onClearFilters,
   visibleColumns,
-  entityType = 'problem'
+  entityType = 'problem',
+  filterOptions = {}
 }) {
   // Load collapsed state from localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -74,7 +75,25 @@ const FiltersSection = memo(function FiltersSection({
         
         {/* Collapsible advanced filters */}
         {!isCollapsed && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-3 border-t border-gray-200">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-3 border-t border-gray-200">
+          {visibleColumns.includes('primary_industry') && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Industry
+              </label>
+              <select
+                value={apiFilters.primary_industry || ''}
+                onChange={(e) => onFilterChange('primary_industry', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="">All Industries</option>
+                {filterOptions.industries?.map(industry => (
+                  <option key={industry} value={industry}>{industry}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {visibleColumns.includes('solution_count') && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -250,7 +269,23 @@ function ClusterRow({ cluster, visibleColumns, entityType = 'problem', isNew, is
             </div>
           </div>
         </td>
-        
+
+        {visibleColumns.includes('primary_industry') && (
+          <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '120px' }}>
+            {cluster.primary_industry ? (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                cluster.primary_industry === 'Consumer'
+                  ? 'bg-purple-100 text-purple-800'
+                  : 'bg-blue-100 text-blue-800'
+              }`}>
+                {cluster.primary_industry}
+              </span>
+            ) : (
+              <span className="text-gray-400">-</span>
+            )}
+          </td>
+        )}
+
         {visibleColumns.includes('problem_count') && entityType === 'problem' && (
           <td className="px-6 py-4 text-sm text-gray-900 text-center" style={{ width: '100px' }}>
             {cluster.problem_count || 0}
@@ -792,8 +827,16 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
   const [apiFilters, setApiFilters] = useState({
     has_solutions: '',
     min_problems: '',
+    primary_industry: '',
     sortBy: 'problem_count',
     sortOrder: 'DESC'
+  });
+
+  // Fetch filter options (industries list)
+  const { data: filterOptions } = useQuery({
+    queryKey: ['clusters-filter-options'],
+    queryFn: () => getClustersFilterOptions(),
+    staleTime: 1000 * 60 * 10, // Cache for 10 minutes
   });
 
   const { data: allClusters, isLoading, refetch: refetchClusters } = useQuery({
@@ -860,12 +903,19 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
       // Cluster label filter
       if (externalFilters.cluster_label) {
         const labelTerm = externalFilters.cluster_label.toLowerCase();
-        filtered = filtered.filter(cluster => 
+        filtered = filtered.filter(cluster =>
           cluster.cluster_label?.toLowerCase().includes(labelTerm) ||
           cluster.label?.toLowerCase().includes(labelTerm)
         );
       }
-      
+
+      // Primary industry filter
+      if (externalFilters.primary_industry) {
+        filtered = filtered.filter(cluster =>
+          cluster.primary_industry === externalFilters.primary_industry
+        );
+      }
+
       // Problem count filter (minimum)
       if (externalFilters.problem_count !== null && externalFilters.problem_count !== undefined) {
         filtered = filtered.filter(cluster => 
@@ -959,6 +1009,7 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
     setApiFilters({
       has_solutions: '',
       min_problems: '',
+      primary_industry: '',
       sortBy: 'problem_count',
       sortOrder: 'DESC'
     });
@@ -999,6 +1050,7 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
           onClearFilters={handleClearFilters}
           visibleColumns={visibleColumns}
           entityType={entityType}
+          filterOptions={filterOptions || {}}
         />
       )}
 
