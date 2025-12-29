@@ -163,6 +163,7 @@ export const TAB_COLUMNS = {
   
   clusters: [
     { key: 'cluster_label', label: 'Cluster Label', required: true, sortable: true },
+    { key: 'primary_industry', label: 'Industry', required: false, sortable: true },
     { key: 'problem_count', label: 'Problems', required: false, sortable: true },
     { key: 'solution_count', label: 'Solutions', required: false, sortable: true },
     { key: 'avg_similarity', label: 'Avg Similarity', required: false, sortable: true },
@@ -197,7 +198,7 @@ export const TAB_COLUMNS = {
 // Default visible columns for each tab
 export const DEFAULT_VISIBLE_COLUMNS = {
   problems: ['title', 'cluster_label', 'impact', 'solution_count', 'created_at'],
-  clusters: ['cluster_label', 'problem_count', 'solution_count', 'avg_similarity', 'created_at'],
+  clusters: ['cluster_label', 'primary_industry', 'problem_count', 'solution_count', 'avg_similarity', 'created_at'],
   solutions: ['title', 'overall_viability', 'candidate_score', 'revenue', 'status', 'created_at'],
   projects: ['name', 'github', 'linear', 'viability', 'status', 'created'],
 };

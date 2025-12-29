@@ -199,9 +199,10 @@ class DatabaseService {
             (SELECT MAX(version) FROM dreamteam.cluster_centroids)
           ) as version
         )
-        SELECT 
+        SELECT
           c.cluster_id,
           c.cluster_label,
+          c.primary_industry,
           c.avg_similarity,
           c.is_outlier_bucket,
           c.created_at,
@@ -212,9 +213,9 @@ class DatabaseService {
         LEFT JOIN dreamteam.solutions s ON s.source_cluster_id = c.cluster_id
         WHERE c.cluster_id = $1
           AND c.version = (SELECT version FROM active_version)
-        GROUP BY c.cluster_id, c.cluster_label, c.avg_similarity, c.is_outlier_bucket, c.created_at
+        GROUP BY c.cluster_id, c.cluster_label, c.primary_industry, c.avg_similarity, c.is_outlier_bucket, c.created_at
       `;
-      
+
       const result = await pool.query(query, [clusterId]);
       return result.rows[0] || null;
     } catch (error) {
@@ -232,11 +233,12 @@ class DatabaseService {
       if (filters.version) {
         baseQuery = `
           WITH cluster_data AS (
-            SELECT 
+            SELECT
               c.cluster_id,
               c.cluster_label,
               c.cluster_insights,
               c.cluster_analysis,
+              c.primary_industry,
               c.avg_similarity,
               c.is_outlier_bucket,
               COUNT(p.id) as problem_count,
@@ -257,11 +259,12 @@ class DatabaseService {
             ) as version
           ),
           cluster_data AS (
-            SELECT 
+            SELECT
               c.cluster_id,
               c.cluster_label,
               c.cluster_insights,
               c.cluster_analysis,
+              c.primary_industry,
               c.avg_similarity,
               c.is_outlier_bucket,
               c.created_at,
@@ -274,11 +277,11 @@ class DatabaseService {
               -- Include outlier bucket to show all clusters
         `;
       }
-      
+
       // Add GROUP BY first
       baseQuery += `
             GROUP BY c.cluster_id, c.cluster_label, c.cluster_insights, c.cluster_analysis,
-                     c.avg_similarity, c.is_outlier_bucket, c.created_at
+                     c.primary_industry, c.avg_similarity, c.is_outlier_bucket, c.created_at
       `;
       
       // Add HAVING filters after GROUP BY
@@ -306,16 +309,27 @@ class DatabaseService {
           SELECT * FROM cluster_data
       `;
       
-      // Add search filter
+      // Add WHERE filters
+      let whereClauses = [];
+
       if (filters.search) {
-        baseQuery += ` WHERE cluster_label ILIKE $${++paramCount}`;
+        whereClauses.push(`cluster_label ILIKE $${++paramCount}`);
         params.push(`%${filters.search}%`);
       }
-      
+
+      if (filters.primary_industry) {
+        whereClauses.push(`primary_industry = $${++paramCount}`);
+        params.push(filters.primary_industry);
+      }
+
+      if (whereClauses.length > 0) {
+        baseQuery += ` WHERE ${whereClauses.join(' AND ')}`;
+      }
+
       // Add sorting
       const sortField = filters.sortBy || 'problem_count';
       const sortOrder = filters.sortOrder || 'DESC';
-      const validSortFields = ['cluster_label', 'problem_count', 'solution_count', 'avg_similarity'];
+      const validSortFields = ['cluster_label', 'problem_count', 'solution_count', 'avg_similarity', 'primary_industry'];
       
       if (validSortFields.includes(sortField)) {
         baseQuery += ` ORDER BY ${sortField} ${sortOrder === 'ASC' ? 'ASC' : 'DESC'}`;
@@ -750,18 +764,20 @@ class DatabaseService {
             (SELECT MAX(version) FROM dreamteam.cluster_centroids)
           ) as version
         )
-        SELECT 
-          ARRAY_AGG(DISTINCT cluster_label ORDER BY cluster_label) FILTER (WHERE cluster_label IS NOT NULL) as cluster_labels
+        SELECT
+          ARRAY_AGG(DISTINCT cluster_label ORDER BY cluster_label) FILTER (WHERE cluster_label IS NOT NULL) as cluster_labels,
+          ARRAY_AGG(DISTINCT primary_industry ORDER BY primary_industry) FILTER (WHERE primary_industry IS NOT NULL) as industries
         FROM dreamteam.cluster_centroids
         WHERE version = (SELECT version FROM active_version)
           AND is_outlier_bucket = false
       `;
       const result = await pool.query(query);
-      
+
       // Ensure arrays are properly formatted
       const options = result.rows[0];
       return {
-        cluster_labels: options.cluster_labels || []
+        cluster_labels: options.cluster_labels || [],
+        industries: options.industries || []
       };
     } catch (error) {
       console.error('Error fetching cluster filter options:', error);
