@@ -8,7 +8,7 @@ import SolutionsTable from './SolutionsTable';
 import ProjectsTable from './ProjectsTable';
 import GraphView from './GraphView';
 import StudyModeModal from './StudyModeModal';
-import { getProblemsFilterOptions, getClustersFilterOptions, getSolutionsFilterOptions } from '../services/api';
+import { getProblemsFilterOptions, getClustersFilterOptions, getSolutionClustersFilterOptions, getSolutionsFilterOptions } from '../services/api';
 
 function EntityView({ entityType }) {
   const location = useLocation();
@@ -73,10 +73,14 @@ function EntityView({ entityType }) {
   });
 
   // Fetch cluster filter options (for industry dropdown)
+  // Use different endpoints based on entity type
   const { data: clusterFilterOptions } = useQuery({
-    queryKey: ['clusters-filter-options'],
-    queryFn: () => getClustersFilterOptions(),
-    staleTime: 1000 * 60 * 10, // Cache for 10 minutes
+    queryKey: [`${entityType}-clusters-filter-options`],
+    queryFn: () => entityType === 'solution'
+      ? getSolutionClustersFilterOptions()
+      : getClustersFilterOptions(),
+    staleTime: 0, // Always refetch when entity type changes
+    enabled: dataMode === 'clusters',
   });
 
   // Calculate dynamic filter options from filtered data
@@ -153,12 +157,17 @@ function EntityView({ entityType }) {
   }, [filteredData, entityType]);
 
   // Fetch filter options based on entity type and data mode
-  const { data: filterOptions } = useQuery({
+  const { data: filterOptions, refetch: refetchFilterOptions } = useQuery({
     queryKey: [`${entityType}-${dataMode}-filter-options`],
     queryFn: () => {
-      // If in clusters mode, get cluster filter options
-      if (dataMode === 'clusters' && (entityType === 'problem' || entityType === 'solution')) {
-        return getClustersFilterOptions();
+      // If in clusters mode, get appropriate cluster filter options
+      if (dataMode === 'clusters') {
+        if (entityType === 'solution') {
+          return getSolutionClustersFilterOptions();
+        }
+        if (entityType === 'problem') {
+          return getClustersFilterOptions();
+        }
       }
       // Otherwise get individual item filter options
       switch (entityType) {
@@ -171,7 +180,15 @@ function EntityView({ entityType }) {
       }
     },
     enabled: ['problem', 'solution'].includes(entityType),
+    staleTime: 0, // Always refetch when query key changes
   });
+
+  // Refetch filter options when data mode changes
+  useEffect(() => {
+    if (['problem', 'solution'].includes(entityType)) {
+      refetchFilterOptions();
+    }
+  }, [dataMode, entityType, refetchFilterOptions]);
 
   // Reset filters when entity type changes
   useEffect(() => {
@@ -621,8 +638,10 @@ function EntityView({ entityType }) {
                     className="text-sm border rounded px-2 py-1"
                   >
                     <option value="">All Industries</option>
-                    {clusterFilterOptions?.industries?.map(industry => (
-                      <option key={industry} value={industry}>{industry}</option>
+                    {clusterFilterOptions?.industries?.map(ind => (
+                      <option key={typeof ind === 'object' ? ind.value : ind} value={typeof ind === 'object' ? ind.value : ind}>
+                        {typeof ind === 'object' ? `${ind.label} (${ind.count})` : ind}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -725,7 +744,7 @@ function EntityView({ entityType }) {
               </>
             )}
 
-            {/* Solution Filters - 8 columns */}
+            {/* Solution Filters - 9 columns (including Industry) */}
             {entityType === 'solution' && dataMode === 'individual' && (
               <>
                 {/* Title Filter */}
@@ -738,6 +757,26 @@ function EntityView({ entityType }) {
                     placeholder="Filter by title"
                     className="text-sm border rounded px-2 py-1"
                   />
+                </div>
+
+                {/* Industry Filter - from source cluster */}
+                <div className="flex flex-col">
+                  <label className="text-xs text-gray-500 mb-1">Industry</label>
+                  <select
+                    value={filters.industry[0] || ''}
+                    onChange={(e) => setFilters(prev => ({
+                      ...prev,
+                      industry: e.target.value ? [e.target.value] : []
+                    }))}
+                    className="text-sm border rounded px-2 py-1"
+                  >
+                    <option value="">All Industries</option>
+                    {filterOptions?.industries?.map(ind => (
+                      <option key={typeof ind === 'object' ? ind.value : ind} value={typeof ind === 'object' ? ind.value : ind}>
+                        {typeof ind === 'object' ? `${ind.label} (${ind.count})` : ind}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Viability Filter */}

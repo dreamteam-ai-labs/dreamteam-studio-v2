@@ -6,10 +6,13 @@ import { formatDateTime, isNewItem } from '../utils/dateUtils';
 import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
+import Pagination from './Pagination';
 import { useTableFeatures } from '../hooks/useTableFeatures';
 import { usePinnedEntities } from '../hooks/usePinnedEntities';
 import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
 import '../styles/tables.css';
+
+const ITEMS_PER_PAGE = 20;
 
 // Use centralized column definitions
 const ALL_COLUMNS = TAB_COLUMNS.clusters;
@@ -242,11 +245,11 @@ const ClusterRow = memo(function ClusterRow({ cluster, visibleColumns, entityTyp
                   ? 'text-gray-500 italic' 
                   : 'text-gray-900'
               }`}>
-                {(cluster.cluster_label === 'Outliers / Low Confidence' || 
+                {(cluster.cluster_label === 'Outliers / Low Confidence' ||
                   cluster.cluster_label === 'Uncategorized Solutions' ||
                   cluster.is_outlier_bucket)
-                  ? '⚠️ Outlier Bucket' 
-                  : cluster.cluster_label}
+                  ? '⚠️ Outlier Bucket'
+                  : cluster.cluster_label || `Cluster #${cluster.cluster_id?.slice(0, 8) || '?'} (unlabeled)`}
               </span>
               {/* Show indicator if cluster has insights */}
               {cluster.cluster_analysis && !cluster.is_outlier_bucket && (
@@ -739,7 +742,7 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [newItemIds, setNewItemIds] = useState(new Set());
   const [flashItemIds, setFlashItemIds] = useState(new Set());
-  const [displayLimit, setDisplayLimit] = useState(50); // Limit rows for performance
+  const [currentPage, setCurrentPage] = useState(1); // Pagination state
   const previousDataRef = useRef(null);
   const searchTerm = externalFilters?.searchTerm ?? localSearchTerm;
   
@@ -952,19 +955,20 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
     const { pinned, unpinned } = separateEntities(filtered);
     
     // Sort unpinned clusters to put outlier bucket at the bottom
+    // Preserve server-side sort order for non-outliers
     const sortedUnpinned = unpinned.sort((a, b) => {
       // Outlier bucket always goes to bottom
-      const aIsOutlier = a.cluster_label === 'Outliers / Low Confidence' || 
+      const aIsOutlier = a.cluster_label === 'Outliers / Low Confidence' ||
                          a.cluster_label === 'Uncategorized Solutions' ||
                          a.is_outlier_bucket;
-      const bIsOutlier = b.cluster_label === 'Outliers / Low Confidence' || 
+      const bIsOutlier = b.cluster_label === 'Outliers / Low Confidence' ||
                          b.cluster_label === 'Uncategorized Solutions' ||
                          b.is_outlier_bucket;
-      
-      if (aIsOutlier) return 1;
-      if (bIsOutlier) return -1;
-      // Otherwise sort by problem count descending
-      return (b.problem_count || 0) - (a.problem_count || 0);
+
+      if (aIsOutlier && !bIsOutlier) return 1;
+      if (bIsOutlier && !aIsOutlier) return -1;
+      // Preserve server-side sort order
+      return 0;
     });
     
     // Return pinned first, then sorted unpinned
@@ -977,7 +981,19 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
     const { pinned, unpinned } = separateEntities(clusters);
     return { pinnedClusters: pinned, unpinnedClusters: unpinned };
   }, [clusters, separateEntities]);
-  
+
+  // Pagination calculations for unpinned clusters
+  const totalUnpinned = unpinnedClusters.length;
+  const totalPages = Math.ceil(totalUnpinned / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedUnpinned = unpinnedClusters.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, externalFilters?.primary_industry, externalFilters?.cluster_label]);
+
   // Pass filtered data back to parent
   useEffect(() => {
     if (onDataFiltered) {
@@ -1158,8 +1174,8 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
                   </tr>
                 )}
                 
-                {/* Render unpinned clusters - limited for performance */}
-                {unpinnedClusters.slice(0, displayLimit).map((cluster) => (
+                {/* Render paginated unpinned clusters */}
+                {paginatedUnpinned.map((cluster) => (
                   <ClusterRow
                     key={cluster.cluster_id}
                     cluster={cluster}
@@ -1172,25 +1188,22 @@ function ClustersTable({ filters: externalFilters, onFiltersChange, onDataFilter
                     onTogglePin={togglePin}
                   />
                 ))}
-                {/* Load More button */}
-                {unpinnedClusters.length > displayLimit && (
-                  <tr>
-                    <td colSpan={visibleColumns.length} className="px-6 py-4 text-center">
-                      <button
-                        onClick={() => setDisplayLimit(prev => prev + 50)}
-                        className="px-4 py-2 bg-primary-500 text-white rounded-md hover:bg-primary-600 transition-colors"
-                      >
-                        Load More ({unpinnedClusters.length - displayLimit} remaining)
-                      </button>
-                    </td>
-                  </tr>
-                )}
               </>
             )}
           </tbody>
         </table>
         </div>
       </div>
+
+      {/* Pagination */}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={totalUnpinned}
+        itemsPerPage={ITEMS_PER_PAGE}
+        onPageChange={setCurrentPage}
+        itemName="clusters"
+      />
     </div>
   );
 }

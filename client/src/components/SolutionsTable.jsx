@@ -7,10 +7,13 @@ import SearchInput from './SearchInput';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
 import StudyModeModal from './StudyModeModal';
+import Pagination from './Pagination';
 import { useTableFeatures } from '../hooks/useTableFeatures';
 import { usePinnedEntities } from '../hooks/usePinnedEntities';
 import { TAB_COLUMNS, DEFAULT_VISIBLE_COLUMNS, getCellClassName, getColumnStyle, getInitialColumnWidths } from '../config/tableConfig';
 import '../styles/tables.css';
+
+const ITEMS_PER_PAGE = 20;
 
 // Use centralized column definitions
 const ALL_COLUMNS = TAB_COLUMNS.solutions;
@@ -76,6 +79,24 @@ const FiltersSection = memo(function FiltersSection({
         {/* Collapsible advanced filters */}
         {!isCollapsed && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-3 border-t border-gray-200">
+          {visibleColumns.includes('industry') && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Industry
+              </label>
+              <select
+                value={apiFilters.industry}
+                onChange={(e) => onFilterChange('industry', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="">All Industries</option>
+                {filterOptions?.industries?.map(industry => (
+                  <option key={industry} value={industry}>{industry}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {visibleColumns.includes('status') && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -222,7 +243,13 @@ const SolutionRow = memo(function SolutionRow({ solution, visibleColumns, isBest
             </div>
           </td>
         )}
-        
+
+        {visibleColumns.includes('industry') && (
+          <td className="px-6 py-4 text-sm text-gray-900 cursor-pointer" style={{ width: '150px' }} onClick={() => setIsExpanded(!isExpanded)}>
+            {solution.industry || <span className="text-gray-400">-</span>}
+          </td>
+        )}
+
         {visibleColumns.includes('overall_viability') && (
           <td className="px-6 py-4 text-center cursor-pointer" style={{ width: '120px' }} onClick={() => setIsExpanded(!isExpanded)}>
             <div className="flex items-center justify-center">
@@ -566,7 +593,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
   const [newItemIds, setNewItemIds] = useState(new Set());
   const [flashItemIds, setFlashItemIds] = useState(new Set());
   const previousDataRef = useRef(null);
-  const [displayLimit, setDisplayLimit] = useState(50); // Limit rows for performance
+  const [currentPage, setCurrentPage] = useState(1); // Pagination state
   
   // Selection handlers
   const handleSelectAll = (solutions) => {
@@ -628,6 +655,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
   } = useTableFeatures(visibleColumns, useMemo(() => getInitialColumnWidths('solutions'), []));
   const [apiFilters, setApiFilters] = useState({
     status: '',
+    industry: '',
     min_viability: '',
     has_project: '',
     sortBy: 'overall_viability',
@@ -777,8 +805,15 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
       } else if (externalFilters.hasProject === false) {
         filtered = filtered.filter(solution => !solution.linear_project_id);
       }
+
+      // Industry filter (from source cluster's primary_industry)
+      if (externalFilters.industry?.length > 0) {
+        filtered = filtered.filter(solution =>
+          externalFilters.industry.includes(solution.industry)
+        );
+      }
     }
-    
+
     return filtered;
   }, [allSolutions, searchTerm, externalFilters]);
 
@@ -786,6 +821,18 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
   const { pinned: pinnedSolutions, unpinned: unpinnedSolutions } = useMemo(() => {
     return separateEntities(solutions);
   }, [solutions, separateEntities]);
+
+  // Pagination calculations for unpinned solutions
+  const totalUnpinned = unpinnedSolutions.length;
+  const totalPages = Math.ceil(totalUnpinned / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedUnpinned = unpinnedSolutions.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, externalFilters?.industry, externalFilters?.status, externalFilters?.source_cluster]);
 
   // Pass filtered data back to parent
   useEffect(() => {
@@ -818,6 +865,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
     setSearchTerm('');
     setApiFilters({
       status: '',
+      industry: '',
       min_viability: '',
       has_project: '',
       sortBy: 'overall_viability',
@@ -999,8 +1047,8 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                     </td>
                   </tr>
                 )}
-                {/* Unpinned solutions - limited for performance */}
-                {unpinnedSolutions.slice(0, displayLimit).map((solution) => (
+                {/* Unpinned solutions - paginated */}
+                {paginatedUnpinned.map((solution) => (
                   <SolutionRow
                     key={solution.id}
                     solution={solution}
@@ -1016,26 +1064,23 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
                     isFlashing={flashItemIds.has(solution.id)}
                   />
                 ))}
-                {/* Load More button */}
-                {unpinnedSolutions.length > displayLimit && (
-                  <tr>
-                    <td colSpan={visibleColumns.length + 2} className="px-6 py-4 text-center">
-                      <button
-                        onClick={() => setDisplayLimit(prev => prev + 50)}
-                        className="px-4 py-2 bg-primary-500 text-white rounded-md hover:bg-primary-600 transition-colors"
-                      >
-                        Load More ({unpinnedSolutions.length - displayLimit} remaining)
-                      </button>
-                    </td>
-                  </tr>
-                )}
               </>
             )}
           </tbody>
         </table>
         </div>
       </div>
-      
+
+      {/* Pagination */}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={totalUnpinned}
+        itemsPerPage={ITEMS_PER_PAGE}
+        onPageChange={setCurrentPage}
+        itemName="solutions"
+      />
+
       {/* Study Mode Modal */}
       <StudyModeModal 
         isOpen={studyModalOpen}
