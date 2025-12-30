@@ -173,6 +173,7 @@ export const TAB_COLUMNS = {
   
   solutions: [
     { key: 'title', label: 'Title & Feature', required: true, sortable: true },
+    { key: 'industry', label: 'Industry', required: false, sortable: true },
     { key: 'overall_viability', label: 'Viability', required: false, sortable: true },
     { key: 'candidate_score', label: 'Score', required: false, sortable: true },
     { key: 'ltv_cac', label: 'LTV/CAC', required: false, sortable: true },
@@ -199,7 +200,7 @@ export const TAB_COLUMNS = {
 export const DEFAULT_VISIBLE_COLUMNS = {
   problems: ['title', 'cluster_label', 'impact', 'solution_count', 'created_at'],
   clusters: ['cluster_label', 'primary_industry', 'problem_count', 'solution_count', 'avg_similarity', 'created_at'],
-  solutions: ['title', 'overall_viability', 'candidate_score', 'revenue', 'status', 'created_at'],
+  solutions: ['title', 'industry', 'overall_viability', 'candidate_score', 'revenue', 'status', 'created_at'],
   projects: ['name', 'github', 'linear', 'viability', 'status', 'created'],
 };
 
