@@ -454,7 +454,7 @@ class DatabaseService {
   async getSolutions(filters = {}) {
     try {
       let query = `
-        SELECT 
+        SELECT
           s.id,
           s.identifier,
           s.title,
@@ -477,10 +477,12 @@ class DatabaseService {
           s.github_repo_url,
           s.created_at,
           s.status,
+          cc.primary_industry as industry,
           COUNT(psm.problem_id) as problem_count,
           ARRAY_AGG(psm.problem_id) FILTER (WHERE psm.problem_id IS NOT NULL) as problem_ids
         FROM dreamteam.solutions s
         LEFT JOIN dreamteam.problem_solution_map psm ON s.id = psm.solution_id
+        LEFT JOIN dreamteam.cluster_centroids cc ON s.source_cluster_id = cc.cluster_id
         WHERE 1=1
       `;
       
@@ -515,16 +517,23 @@ class DatabaseService {
         }
       }
 
-      query += ` GROUP BY s.id`;
+      if (filters.industry) {
+        query += ` AND cc.primary_industry = $${++paramCount}`;
+        values.push(filters.industry);
+      }
+
+      query += ` GROUP BY s.id, cc.primary_industry`;
       
       // Add sorting
       const sortField = filters.sortBy || 'overall_viability';
       const sortOrder = filters.sortOrder || 'DESC';
-      const validSortFields = ['title', 'overall_viability', 'candidate_score', 'status', 'created_at', 'ltv_estimate', 'recurring_revenue_potential', 'problem_count'];
+      const validSortFields = ['title', 'overall_viability', 'candidate_score', 'status', 'created_at', 'ltv_estimate', 'recurring_revenue_potential', 'problem_count', 'industry'];
       
       if (validSortFields.includes(sortField)) {
         if (sortField === 'problem_count') {
           query += ` ORDER BY problem_count ${sortOrder === 'ASC' ? 'ASC' : 'DESC'} NULLS LAST`;
+        } else if (sortField === 'industry') {
+          query += ` ORDER BY cc.primary_industry ${sortOrder === 'ASC' ? 'ASC' : 'DESC'} NULLS LAST`;
         } else {
           query += ` ORDER BY s.${sortField} ${sortOrder === 'ASC' ? 'ASC' : 'DESC'} NULLS LAST`;
         }
@@ -721,31 +730,39 @@ class DatabaseService {
   // === FILTER OPTIONS ===
   async getProblemsFilterOptions() {
     try {
-      const query = `
-        SELECT 
+      // Get basic options
+      const basicQuery = `
+        SELECT
           ARRAY_AGG(DISTINCT impact ORDER BY impact) FILTER (WHERE impact IS NOT NULL) as impacts,
-          ARRAY_AGG(DISTINCT industry ORDER BY industry) FILTER (WHERE industry IS NOT NULL) as industries,
           ARRAY_AGG(DISTINCT business_size ORDER BY business_size) FILTER (WHERE business_size IS NOT NULL) as business_sizes,
           ARRAY_AGG(DISTINCT cluster_label ORDER BY cluster_label) FILTER (WHERE cluster_label IS NOT NULL) as cluster_labels
         FROM dreamteam.problems
       `;
-      const result = await pool.query(query);
-      
-      // Parse PostgreSQL array strings if needed
-      const options = result.rows[0];
+      const basicResult = await pool.query(basicQuery);
+
+      // Get industries with counts
+      const industriesQuery = `
+        SELECT industry as value, industry as label, COUNT(*) as count
+        FROM dreamteam.problems
+        WHERE industry IS NOT NULL
+        GROUP BY industry
+        ORDER BY count DESC, industry
+      `;
+      const industriesResult = await pool.query(industriesQuery);
+
+      const options = basicResult.rows[0];
       const parseArray = (val) => {
         if (!val) return [];
         if (Array.isArray(val)) return val;
-        // Parse PostgreSQL array string format: "{item1,item2,item3}"
         if (typeof val === 'string' && val.startsWith('{') && val.endsWith('}')) {
           return val.slice(1, -1).split(',');
         }
         return [];
       };
-      
+
       return {
         impacts: parseArray(options.impacts),
-        industries: options.industries || [],
+        industries: industriesResult.rows.map(r => ({ value: r.value, label: r.label, count: parseInt(r.count) })),
         business_sizes: options.business_sizes || [],
         cluster_labels: options.cluster_labels || []
       };
@@ -757,7 +774,8 @@ class DatabaseService {
 
   async getClustersFilterOptions() {
     try {
-      const query = `
+      // Get cluster labels
+      const labelsQuery = `
         WITH active_version AS (
           SELECT COALESCE(
             (SELECT version FROM dreamteam.cluster_versions WHERE is_active = true),
@@ -765,19 +783,35 @@ class DatabaseService {
           ) as version
         )
         SELECT
-          ARRAY_AGG(DISTINCT cluster_label ORDER BY cluster_label) FILTER (WHERE cluster_label IS NOT NULL) as cluster_labels,
-          ARRAY_AGG(DISTINCT primary_industry ORDER BY primary_industry) FILTER (WHERE primary_industry IS NOT NULL) as industries
+          ARRAY_AGG(DISTINCT cluster_label ORDER BY cluster_label) FILTER (WHERE cluster_label IS NOT NULL) as cluster_labels
         FROM dreamteam.cluster_centroids
         WHERE version = (SELECT version FROM active_version)
           AND is_outlier_bucket = false
       `;
-      const result = await pool.query(query);
+      const labelsResult = await pool.query(labelsQuery);
 
-      // Ensure arrays are properly formatted
-      const options = result.rows[0];
+      // Get industries with counts
+      const industriesQuery = `
+        WITH active_version AS (
+          SELECT COALESCE(
+            (SELECT version FROM dreamteam.cluster_versions WHERE is_active = true),
+            (SELECT MAX(version) FROM dreamteam.cluster_centroids)
+          ) as version
+        )
+        SELECT primary_industry as value, primary_industry as label, COUNT(*) as count
+        FROM dreamteam.cluster_centroids
+        WHERE version = (SELECT version FROM active_version)
+          AND is_outlier_bucket = false
+          AND primary_industry IS NOT NULL
+        GROUP BY primary_industry
+        ORDER BY count DESC, primary_industry
+      `;
+      const industriesResult = await pool.query(industriesQuery);
+
+      const options = labelsResult.rows[0];
       return {
         cluster_labels: options.cluster_labels || [],
-        industries: options.industries || []
+        industries: industriesResult.rows.map(r => ({ value: r.value, label: r.label, count: parseInt(r.count) }))
       };
     } catch (error) {
       console.error('Error fetching cluster filter options:', error);
@@ -787,32 +821,101 @@ class DatabaseService {
 
   async getSolutionsFilterOptions() {
     try {
-      const query = `
-        SELECT 
-          ARRAY_AGG(DISTINCT status ORDER BY status) FILTER (WHERE status IS NOT NULL) as statuses,
-          ARRAY_AGG(DISTINCT source_cluster_label ORDER BY source_cluster_label) FILTER (WHERE source_cluster_label IS NOT NULL) as cluster_labels
-        FROM dreamteam.solutions
+      // Get basic options
+      const basicQuery = `
+        SELECT
+          ARRAY_AGG(DISTINCT s.status ORDER BY s.status) FILTER (WHERE s.status IS NOT NULL) as statuses,
+          ARRAY_AGG(DISTINCT s.source_cluster_label ORDER BY s.source_cluster_label) FILTER (WHERE s.source_cluster_label IS NOT NULL) as cluster_labels
+        FROM dreamteam.solutions s
       `;
-      const result = await pool.query(query);
-      
-      // Parse PostgreSQL array strings if needed
-      const options = result.rows[0];
+      const basicResult = await pool.query(basicQuery);
+
+      // Get industries with counts - join to active cluster version only
+      const industriesQuery = `
+        WITH active_cluster_version AS (
+          SELECT version FROM dreamteam.cluster_versions WHERE is_active = true
+        )
+        SELECT COALESCE(cc.primary_industry, s.target_industry) as value,
+               COALESCE(cc.primary_industry, s.target_industry) as label,
+               COUNT(*) as count
+        FROM dreamteam.solutions s
+        LEFT JOIN dreamteam.cluster_centroids cc
+          ON s.source_cluster_id = cc.cluster_id
+          AND cc.version = (SELECT version FROM active_cluster_version)
+        WHERE COALESCE(cc.primary_industry, s.target_industry) IS NOT NULL
+        GROUP BY COALESCE(cc.primary_industry, s.target_industry)
+        ORDER BY count DESC, COALESCE(cc.primary_industry, s.target_industry)
+      `;
+      const industriesResult = await pool.query(industriesQuery);
+
+      const options = basicResult.rows[0];
       const parseArray = (val) => {
         if (!val) return [];
         if (Array.isArray(val)) return val;
-        // Parse PostgreSQL array string format: "{item1,item2,item3}"
         if (typeof val === 'string' && val.startsWith('{') && val.endsWith('}')) {
           return val.slice(1, -1).split(',');
         }
         return [];
       };
-      
+
       return {
         statuses: parseArray(options.statuses),
-        cluster_labels: options.cluster_labels || []
+        cluster_labels: options.cluster_labels || [],
+        industries: industriesResult.rows.map(r => ({ value: r.value, label: r.label, count: parseInt(r.count) }))
       };
     } catch (error) {
       console.error('Error fetching solution filter options:', error);
+      throw error;
+    }
+  }
+
+  async getSolutionClustersFilterOptions() {
+    try {
+      console.log('=== getSolutionClustersFilterOptions called ===');
+      // Get cluster labels
+      const labelsQuery = `
+        WITH active_version AS (
+          SELECT COALESCE(
+            (SELECT version FROM dreamteam.solution_cluster_versions WHERE is_active = true),
+            (SELECT MAX(version) FROM dreamteam.solution_cluster_centroids)
+          ) as version
+        )
+        SELECT
+          ARRAY_AGG(DISTINCT cluster_label ORDER BY cluster_label) FILTER (WHERE cluster_label IS NOT NULL) as cluster_labels
+        FROM dreamteam.solution_cluster_centroids
+        WHERE version = (SELECT version FROM active_version)
+          AND is_outlier_bucket = false
+      `;
+      const labelsResult = await pool.query(labelsQuery);
+
+      // Get industries with counts
+      const industriesQuery = `
+        WITH active_version AS (
+          SELECT COALESCE(
+            (SELECT version FROM dreamteam.solution_cluster_versions WHERE is_active = true),
+            (SELECT MAX(version) FROM dreamteam.solution_cluster_centroids)
+          ) as version
+        )
+        SELECT primary_industry as value, primary_industry as label, COUNT(*) as count
+        FROM dreamteam.solution_cluster_centroids
+        WHERE version = (SELECT version FROM active_version)
+          AND is_outlier_bucket = false
+          AND primary_industry IS NOT NULL
+        GROUP BY primary_industry
+        ORDER BY count DESC, primary_industry
+      `;
+      const industriesResult = await pool.query(industriesQuery);
+      console.log('Solution cluster industries result:', industriesResult.rows);
+
+      const options = labelsResult.rows[0];
+      const result = {
+        cluster_labels: options?.cluster_labels || [],
+        industries: industriesResult.rows.map(r => ({ value: r.value, label: r.label, count: parseInt(r.count) }))
+      };
+      console.log('Returning solution cluster filter options:', JSON.stringify(result.industries));
+      return result;
+    } catch (error) {
+      console.error('Error fetching solution cluster filter options:', error);
       throw error;
     }
   }
@@ -858,17 +961,19 @@ class DatabaseService {
       let baseQuery;
       let params = [];
       let paramCount = 0;
-      
+
       if (filters.version) {
         baseQuery = `
           WITH cluster_data AS (
-            SELECT 
+            SELECT
               c.cluster_id,
               c.cluster_label,
               c.cluster_insights,
               c.cluster_analysis,
               c.avg_similarity,
               c.is_outlier_bucket,
+              c.created_at,
+              c.primary_industry,
               COUNT(s.id) as solution_count,
               COUNT(s.id) as problem_count  -- For UI compatibility
             FROM dreamteam.solution_cluster_centroids c
@@ -885,7 +990,7 @@ class DatabaseService {
             ) as version
           ),
           cluster_data AS (
-            SELECT 
+            SELECT
               c.cluster_id,
               c.cluster_label,
               c.cluster_insights,
@@ -893,6 +998,7 @@ class DatabaseService {
               c.avg_similarity,
               c.is_outlier_bucket,
               c.created_at,
+              c.primary_industry,
               COUNT(s.id) as solution_count,
               COUNT(s.id) as problem_count  -- For UI compatibility
             FROM dreamteam.solution_cluster_centroids c
@@ -900,42 +1006,48 @@ class DatabaseService {
             WHERE c.version = (SELECT version FROM active_version)
         `;
       }
-      
+
       // Add GROUP BY first
       baseQuery += `
             GROUP BY c.cluster_id, c.cluster_label, c.cluster_insights, c.cluster_analysis,
-                     c.avg_similarity, c.is_outlier_bucket, c.created_at
+                     c.avg_similarity, c.is_outlier_bucket, c.created_at, c.primary_industry
       `;
-      
+
       // Add HAVING clause if needed
       if (filters.min_solutions) {
         baseQuery += ` HAVING COUNT(s.id) >= $${++paramCount}`;
         params.push(parseInt(filters.min_solutions));
       }
-      
+
       // Complete the CTE and main query
       let query = baseQuery + `
           )
           SELECT * FROM cluster_data WHERE 1=1
       `;
-      
+
       // Add search filter
       if (filters.search) {
         query += ` AND cluster_label ILIKE $${++paramCount}`;
         params.push(`%${filters.search}%`);
       }
-      
+
+      // Add primary_industry filter
+      if (filters.primary_industry) {
+        query += ` AND primary_industry = $${++paramCount}`;
+        params.push(filters.primary_industry);
+      }
+
       // Add sorting
       const sortField = filters.sortBy || 'solution_count';
       const sortOrder = filters.sortOrder || 'DESC';
-      const validSortFields = ['cluster_label', 'solution_count', 'avg_similarity'];
-      
+      const validSortFields = ['cluster_label', 'solution_count', 'avg_similarity', 'primary_industry'];
+
       if (validSortFields.includes(sortField)) {
         query += ` ORDER BY ${sortField} ${sortOrder === 'ASC' ? 'ASC' : 'DESC'}`;
       } else {
         query += ` ORDER BY solution_count DESC`;
       }
-      
+
       const result = await pool.query(query, params);
       return result.rows;
     } catch (error) {

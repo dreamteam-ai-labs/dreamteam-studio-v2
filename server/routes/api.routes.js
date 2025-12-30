@@ -119,6 +119,15 @@ router.get('/clusters/:id/problems', async (req, res) => {
 });
 
 // === SOLUTION CLUSTERS ===
+router.get('/solution-clusters/filter-options', async (req, res) => {
+  try {
+    const options = await databaseService.getSolutionClustersFilterOptions();
+    res.json(options);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/solution-clusters', async (req, res) => {
   try {
     const filters = {
@@ -126,6 +135,7 @@ router.get('/solution-clusters', async (req, res) => {
       has_solutions: req.query.has_solutions,
       min_solutions: req.query.min_solutions,
       search: req.query.search,
+      primary_industry: req.query.primary_industry,
       sortBy: req.query.sortBy,
       sortOrder: req.query.sortOrder
     };
@@ -174,6 +184,7 @@ router.get('/solutions', async (req, res) => {
       status: req.query.status,
       min_viability: req.query.min_viability,
       has_project: req.query.has_project,
+      industry: req.query.industry,
       search: req.query.search,
       sortBy: req.query.sortBy,
       sortOrder: req.query.sortOrder
