@@ -459,16 +459,30 @@ class DatabaseService {
           s.identifier,
           s.title,
           s.description,
+          s.source_url,
           s.value_proposition,
+          s.target_audience,
           s.primary_feature,
+          s.problem_statement,
+          s.key_features,
+          s.differentiators,
           s.overall_viability,
           s.candidate_score,
           s.technical_feasibility,
           s.market_demand,
           s.competitive_advantage,
+          s.resource_requirements,
           s.ltv_estimate,
           s.cac_estimate,
           s.recurring_revenue_potential,
+          s.market_size_estimate,
+          s.revenue_model,
+          s.pricing_strategy,
+          s.payback_months,
+          s.estimated_dev_weeks,
+          s.team_size_required,
+          s.initial_investment,
+          s.is_saas_compatible,
           s.source_cluster_id,
           s.source_cluster_label,
           s.solution_cluster_id,
@@ -477,7 +491,9 @@ class DatabaseService {
           s.github_repo_url,
           s.created_at,
           s.status,
-          cc.primary_industry as industry,
+          s.tech_stack,
+          s.target_industry,
+          COALESCE(cc.primary_industry, s.target_industry) as industry,
           COUNT(psm.problem_id) as problem_count,
           ARRAY_AGG(psm.problem_id) FILTER (WHERE psm.problem_id IS NOT NULL) as problem_ids
         FROM dreamteam.solutions s
@@ -518,7 +534,7 @@ class DatabaseService {
       }
 
       if (filters.industry) {
-        query += ` AND cc.primary_industry = $${++paramCount}`;
+        query += ` AND COALESCE(cc.primary_industry, s.target_industry) = $${++paramCount}`;
         values.push(filters.industry);
       }
 
@@ -1059,7 +1075,7 @@ class DatabaseService {
   async getSolutionsByClusterId(clusterId) {
     try {
       const query = `
-        SELECT 
+        SELECT
           s.id,
           s.identifier,
           s.title,
@@ -1077,6 +1093,248 @@ class DatabaseService {
       return result.rows;
     } catch (error) {
       console.error('Error fetching solutions by cluster:', error);
+      throw error;
+    }
+  }
+
+  // === SOLUTION CRUD ===
+
+  async createSolution(data) {
+    try {
+      // Generate identifier from title
+      const identifier = 'SOL-' + Date.now().toString(36).toUpperCase();
+
+      // Auto-generate title from URL domain if only URL provided
+      let title = data.title;
+      if (!title && data.source_url) {
+        try {
+          const url = new URL(data.source_url);
+          title = url.hostname.replace(/^www\./, '').split('.')[0];
+          title = title.charAt(0).toUpperCase() + title.slice(1) + ' Clone';
+        } catch (e) {
+          title = 'URL-based Solution';
+        }
+      }
+
+      const query = `
+        INSERT INTO dreamteam.solutions (
+          identifier,
+          title,
+          description,
+          source_url,
+          value_proposition,
+          target_audience,
+          status,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'candidate', NOW())
+        RETURNING *
+      `;
+
+      const values = [
+        identifier,
+        title,
+        data.description || null,
+        data.source_url || null,
+        data.value_proposition || null,
+        data.target_audience || null
+      ];
+
+      const result = await pool.query(query, values);
+      console.log('Created solution:', result.rows[0].identifier, result.rows[0].title);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error creating solution:', error);
+      throw error;
+    }
+  }
+
+  async updateSolution(id, data) {
+    try {
+      // Only allow updating certain fields (not generated fields)
+      const allowedFields = [
+        'title', 'description', 'source_url', 'value_proposition',
+        'target_audience', 'problem_statement', 'primary_feature',
+        'key_features', 'differentiators', 'tech_stack'
+      ];
+
+      const updates = [];
+      const values = [];
+      let paramCount = 0;
+
+      for (const [key, value] of Object.entries(data)) {
+        if (allowedFields.includes(key)) {
+          updates.push(`${key} = $${++paramCount}`);
+          values.push(value);
+        }
+      }
+
+      if (updates.length === 0) {
+        throw new Error('No valid fields to update');
+      }
+
+      values.push(id);
+      const query = `
+        UPDATE dreamteam.solutions
+        SET ${updates.join(', ')}, updated_at = NOW()
+        WHERE id = $${++paramCount}
+        RETURNING *
+      `;
+
+      const result = await pool.query(query, values);
+      if (result.rows.length === 0) {
+        throw new Error('Solution not found');
+      }
+
+      console.log('Updated solution:', result.rows[0].identifier);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error updating solution:', error);
+      throw error;
+    }
+  }
+
+  async deleteSolutions(ids) {
+    try {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        throw new Error('No solution IDs provided');
+      }
+
+      // Check for associated products first
+      const productCheckQuery = `
+        SELECT s.id, s.title, p.id as project_id, p.name as project_name
+        FROM dreamteam.solutions s
+        INNER JOIN dreamteam.projects p ON p.solution_id = s.id
+        WHERE s.id = ANY($1::uuid[])
+      `;
+      const productCheck = await pool.query(productCheckQuery, [ids]);
+
+      if (productCheck.rows.length > 0) {
+        const blockedSolutions = productCheck.rows.map(r => ({
+          id: r.id,
+          title: r.title,
+          project_name: r.project_name
+        }));
+        throw new Error(JSON.stringify({
+          code: 'HAS_PRODUCTS',
+          message: 'Cannot delete solutions with associated products. Delete products first.',
+          blocked_solutions: blockedSolutions
+        }));
+      }
+
+      // Delete from problem_solution_map first (FK constraint)
+      await pool.query(
+        `DELETE FROM dreamteam.problem_solution_map WHERE solution_id = ANY($1::uuid[])`,
+        [ids]
+      );
+
+      // Delete solutions
+      const deleteQuery = `
+        DELETE FROM dreamteam.solutions
+        WHERE id = ANY($1::uuid[])
+        RETURNING id, identifier, title
+      `;
+      const result = await pool.query(deleteQuery, [ids]);
+
+      console.log(`Deleted ${result.rows.length} solutions:`, result.rows.map(r => r.identifier).join(', '));
+      return {
+        deleted_count: result.rows.length,
+        deleted_solutions: result.rows
+      };
+    } catch (error) {
+      console.error('Error deleting solutions:', error);
+      throw error;
+    }
+  }
+
+  // === PRODUCT CRUD ===
+
+  async getProductsBySolutionIds(solutionIds) {
+    try {
+      const query = `
+        SELECT
+          p.id,
+          p.name,
+          p.solution_id,
+          p.github_repo_url,
+          p.github_repo_name
+        FROM dreamteam.projects p
+        WHERE p.solution_id = ANY($1::uuid[])
+      `;
+      const result = await pool.query(query, [solutionIds]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching products by solution IDs:', error);
+      throw error;
+    }
+  }
+
+  async deleteProducts(ids) {
+    try {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        throw new Error('No product IDs provided');
+      }
+
+      // Get products with their GitHub repo URLs and GCP tenant IDs for cascade deletion
+      const productsQuery = `
+        SELECT id, name, solution_id, github_repo_url, github_repo_name, gcpip_tenant_id
+        FROM dreamteam.projects
+        WHERE id = ANY($1::uuid[])
+      `;
+      const products = await pool.query(productsQuery, [ids]);
+
+      if (products.rows.length === 0) {
+        throw new Error('No products found with the provided IDs');
+      }
+
+      // Collect GitHub repos to delete
+      const githubRepos = products.rows
+        .filter(p => p.github_repo_url)
+        .map(p => ({
+          id: p.id,
+          name: p.github_repo_name,
+          url: p.github_repo_url
+        }));
+
+      // Collect GCP tenants to delete
+      const gcpTenants = products.rows
+        .filter(p => p.gcpip_tenant_id)
+        .map(p => ({
+          id: p.id,
+          tenantId: p.gcpip_tenant_id,
+          name: p.name
+        }));
+
+      // Get solution IDs to update
+      const solutionIds = [...new Set(products.rows.map(p => p.solution_id).filter(Boolean))];
+
+      // Delete products
+      const deleteQuery = `
+        DELETE FROM dreamteam.projects
+        WHERE id = ANY($1::uuid[])
+        RETURNING id, name
+      `;
+      const result = await pool.query(deleteQuery, [ids]);
+
+      // Clear github_repo_url on associated solutions
+      if (solutionIds.length > 0) {
+        await pool.query(
+          `UPDATE dreamteam.solutions
+           SET github_repo_url = NULL, linear_project_id = NULL
+           WHERE id = ANY($1::uuid[])`,
+          [solutionIds]
+        );
+      }
+
+      console.log(`Deleted ${result.rows.length} products:`, result.rows.map(r => r.name).join(', '));
+      return {
+        deleted_count: result.rows.length,
+        deleted_products: result.rows,
+        github_repos_to_delete: githubRepos,
+        gcp_tenants_to_delete: gcpTenants,
+        updated_solution_ids: solutionIds
+      };
+    } catch (error) {
+      console.error('Error deleting products:', error);
       throw error;
     }
   }

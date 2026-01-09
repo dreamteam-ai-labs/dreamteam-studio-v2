@@ -14,8 +14,8 @@ class N8nService {
     this.workflows = {
       f1_ingest: `${this.webhookUrl}/f1-problem-ingestion`,
       f2_cluster: `${this.webhookUrl}/f2-clustering`,
-      f3_generate: `${this.webhookUrl}/f3-generate-solutions`,
-      f4_birth: `${this.webhookUrl}/f4-project-birth`,
+      f3_generate: `${this.webhookUrl}/f3-generate-solution`,
+      f4_birth: `${this.webhookUrl}/f4-create-product`,
       pipeline_status: `${this.webhookUrl}/pipeline-status`
     };
   }
@@ -78,7 +78,7 @@ class N8nService {
   }
 
   /**
-   * Trigger F3: Solution Generation
+   * Trigger F3: Solution Generation (from cluster)
    */
   async triggerSolutionGeneration(clusterId) {
     try {
@@ -101,6 +101,50 @@ class N8nService {
       return await response.json();
     } catch (error) {
       console.error('Error triggering F3:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Trigger F3: Create Solution (with URL and/or user fields)
+   * F3 handles all input modes - URL research, manual fields, or both
+   */
+  async createSolution(solutionData) {
+    try {
+      const response = await fetch(this.workflows.f3_generate, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': this.apiKey
+        },
+        body: JSON.stringify({
+          // Pass URL if provided (triggers URL mode in F3)
+          url: solutionData.source_url || null,
+          // Pass all user-provided fields (F3 preserves these)
+          title: solutionData.title || null,
+          description: solutionData.description || null,
+          value_proposition: solutionData.value_proposition || null,
+          target_audience: solutionData.target_audience || null,
+          problem_statement: solutionData.problem_statement || null,
+          primary_feature: solutionData.primary_feature || null,
+          key_features: solutionData.key_features || null,
+          differentiators: solutionData.differentiators || null,
+          tech_stack: solutionData.tech_stack || null,
+          revenue_model: solutionData.revenue_model || null,
+          pricing_strategy: solutionData.pricing_strategy || null,
+          target_industry: solutionData.target_industry || null,
+          triggered_by: 'studio-v2'
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`n8n responded with ${response.status}: ${errorText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error triggering F3 create solution:', error);
       throw error;
     }
   }

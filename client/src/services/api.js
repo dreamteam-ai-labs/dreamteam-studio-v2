@@ -56,11 +56,26 @@ export const getSolutionsByProblem = (problemId) => api.get(`/problems/${problem
 export const getBestSolutionCandidate = () => api.get('/solutions/best-candidate');
 export const createProductFromSolution = (solutionId) => api.post(`/solutions/${solutionId}/create-product`);
 
+// Solution CRUD
+export const createSolution = (data) => api.post('/solutions', data);
+export const updateSolution = (id, data) => api.put(`/solutions/${id}`, data);
+export const deleteSolutions = (ids) => api.delete('/solutions', { data: { ids } });
+
+// Solution AI helpers
+export const getCloneSuggestion = (excludeUrls = []) => {
+  const params = excludeUrls.length > 0 ? { exclude: excludeUrls.join(',') } : {};
+  return api.get('/solutions/clone-suggestion', { params });
+};
+export const analyzeUrl = (url) => api.post('/solutions/analyze-url', { url });
+
 // Projects
 export const getProjects = () => api.get('/projects');
 export const createCodespace = (projectId) => api.post(`/projects/${projectId}/create-codespace`);
 export const getCodespaceStatus = (projectId) => api.get(`/projects/${projectId}/codespace-status`);
 export const deleteCodespace = (projectId, codespaceId) => api.delete(`/projects/${projectId}/codespace`, { data: { codespaceId } });
+
+// Product CRUD
+export const deleteProducts = (ids) => api.delete('/products', { data: { ids } });
 
 // Pipeline
 export const getPipelineStats = () => api.get('/pipeline/stats');

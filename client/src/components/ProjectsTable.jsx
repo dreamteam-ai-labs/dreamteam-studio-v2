@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useCallback, memo, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getProjects, getSolutions, getProblemsBySolution, getProblemsByCluster, createCodespace } from '../services/api';
+import { getProjects, getSolutions, getProblemsBySolution, getProblemsByCluster, createCodespace, deleteProducts } from '../services/api';
 import ColumnSelector from './ColumnSelector';
 import TableHeader from './TableHeader';
 import { useTableFeatures } from '../hooks/useTableFeatures';
@@ -36,7 +36,7 @@ function CodespaceCell({ project }) {
 }
 
 // Project row component with full journey view
-function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
+function ProjectRow({ project, solution, visibleColumns, newProjectIds, isSelected, onToggleSelect }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Fetch problems directly linked to solution
@@ -56,6 +56,15 @@ function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
   return (
     <>
       <tr className={`hover:bg-gray-50 cursor-pointer ${newProjectIds.has(project.id) ? 'flash-new new-item' : ''}`} onClick={() => setIsExpanded(!isExpanded)}>
+        <td className="px-3 py-3 text-center" style={{ width: '40px' }} onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={onToggleSelect}
+            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+            title="Select for bulk actions"
+          />
+        </td>
         {visibleColumns.includes('name') && (
           <td className="px-4 py-3" style={{ minWidth: '350px' }}>
             <div className="flex items-start gap-2">
@@ -183,7 +192,7 @@ function ProjectRow({ project, solution, visibleColumns, newProjectIds }) {
       {/* Expanded Details with Full Journey */}
       {isExpanded && (
         <tr>
-          <td colSpan={visibleColumns.length} className="px-6 py-0">
+          <td colSpan={visibleColumns.length + 1} className="px-6 py-0">
             <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 mb-4 rounded">
               <div className="space-y-4">
                 {/* Project Details */}
@@ -396,6 +405,10 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [sortBy, setSortBy] = useState(null);
   const [sortOrder, setSortOrder] = useState('asc');
+
+  // Selection state
+  const [selectedItems, setSelectedItems] = useState(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // Load saved column preferences or use defaults
   const [visibleColumns, setVisibleColumns] = useState(() => {
@@ -488,6 +501,60 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
       setSortOrder('asc');
     }
   }, [sortBy, sortOrder]);
+
+  // Selection handlers
+  const handleSelectAll = useCallback((projectsList) => {
+    const allIds = projectsList.map(p => p.id);
+    if (selectedItems.size === allIds.length && allIds.every(id => selectedItems.has(id))) {
+      setSelectedItems(new Set());
+    } else {
+      setSelectedItems(new Set(allIds));
+    }
+  }, [selectedItems]);
+
+  const handleSelectItem = useCallback((itemId) => {
+    setSelectedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleDeleteSelected = async () => {
+    if (selectedItems.size === 0) return;
+
+    const selectedCount = selectedItems.size;
+    const confirmMessage = `Are you sure you want to delete ${selectedCount} product${selectedCount > 1 ? 's' : ''}?\n\n⚠️ WARNING: This will also delete the associated GitHub repositories!\n\nThis action cannot be undone.`;
+
+    if (!window.confirm(confirmMessage)) return;
+
+    setIsDeleting(true);
+    try {
+      const ids = Array.from(selectedItems);
+      const result = await deleteProducts(ids);
+
+      // Clear selection
+      setSelectedItems(new Set());
+
+      // Refresh projects
+      await refetchProjects();
+
+      let message = `Successfully deleted ${result.deleted_count} product${result.deleted_count > 1 ? 's' : ''}.`;
+      if (result.github_deletion) {
+        message += `\n\nGitHub repos: ${result.github_deletion.deleted_count} deleted, ${result.github_deletion.failed_count} failed.`;
+      }
+      alert(message);
+    } catch (error) {
+      console.error('Error deleting products:', error);
+      alert(`Failed to delete products: ${error.response?.data?.message || error.message}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Apply external filters if provided
   const filteredProjects = useMemo(() => {
@@ -649,22 +716,36 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
               Products Launched ({projects?.length || 0})
             </h2>
             <div className="flex items-center gap-2">
+              {/* Delete button - only show when items are selected */}
+              {selectedItems.size > 0 && (
+                <button
+                  onClick={handleDeleteSelected}
+                  disabled={isDeleting}
+                  className="flex items-center gap-2 px-3 py-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                  title={`Delete ${selectedItems.size} selected product${selectedItems.size > 1 ? 's' : ''} (including GitHub repos)`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  {isDeleting ? 'Deleting...' : `Delete (${selectedItems.size})`}
+                </button>
+              )}
               <button
                 onClick={handleRefresh}
                 disabled={isRefreshing}
                 className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                 title="Refresh projects"
               >
-                <svg 
-                  className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} 
-                  fill="none" 
-                  stroke="currentColor" 
+                <svg
+                  className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </button>
-              <ColumnSelector 
+              <ColumnSelector
                 columns={ALL_COLUMNS}
                 selectedColumns={visibleColumns}
                 onColumnChange={handleColumnChange}
@@ -690,6 +771,15 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
           <table className="data-table divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-3 py-3 text-center" style={{ width: '40px' }}>
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                    title="Select all"
+                    checked={projectsWithDetails?.length > 0 && projectsWithDetails.every(p => selectedItems.has(p.id))}
+                    onChange={() => handleSelectAll(projectsWithDetails)}
+                  />
+                </th>
                 {ALL_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(column => (
                   <TableHeader
                     key={column.key}
@@ -706,7 +796,7 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
             <tbody className="divide-y divide-gray-200">
               {projectsWithDetails?.length === 0 ? (
                 <tr>
-                  <td colSpan={visibleColumns.length} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={visibleColumns.length + 1} className="px-6 py-8 text-center text-gray-500">
                     <div className="flex flex-col items-center">
                       <span className="text-4xl mb-2">🚀</span>
                       <p className="text-lg font-medium">No products launched yet</p>
@@ -716,12 +806,14 @@ function ProjectsTable({ filters: externalFilters, onFiltersChange, onDataFilter
                 </tr>
               ) : (
                 projectsWithDetails?.map((project) => (
-                  <ProjectRow 
-                    key={project.id} 
-                    project={project} 
+                  <ProjectRow
+                    key={project.id}
+                    project={project}
                     solution={project.solution_details}
                     visibleColumns={visibleColumns}
                     newProjectIds={newProjectIds}
+                    isSelected={selectedItems.has(project.id)}
+                    onToggleSelect={() => handleSelectItem(project.id)}
                   />
                 ))
               )}

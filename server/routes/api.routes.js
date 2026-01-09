@@ -3,6 +3,9 @@ import fetch from 'node-fetch';
 import databaseService from '../services/database.service.js';
 import n8nService from '../services/n8n.service.js';
 import codespaceService from '../services/codespace.service.js';
+import githubService from '../services/github.service.js';
+import gcpService from '../services/gcp.service.js';
+import llmService from '../services/llm.service.js';
 
 const router = Router();
 
@@ -205,11 +208,156 @@ router.get('/solutions/filter-options', async (req, res) => {
   }
 });
 
+// Get a clone candidate suggestion from LLM
+router.get('/solutions/clone-suggestion', async (req, res) => {
+  try {
+    // Parse excluded URLs from query param (comma-separated)
+    const excludeUrls = req.query.exclude ? req.query.exclude.split(',') : [];
+    const suggestion = await llmService.getCloneSuggestion(excludeUrls);
+    res.json(suggestion);
+  } catch (error) {
+    console.error('Error getting clone suggestion:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Analyze a URL and extract product information
+router.post('/solutions/analyze-url', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+    const analysis = await llmService.analyzeUrl(url);
+    res.json(analysis);
+  } catch (error) {
+    console.error('Error analyzing URL:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/solutions/:id/problems', async (req, res) => {
   try {
     const problems = await databaseService.getProblemsBySolutionId(req.params.id);
     res.json(problems);
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create a new solution - triggers F3 workflow
+router.post('/solutions', async (req, res) => {
+  try {
+    const { source_url, title, description, value_proposition, target_audience,
+            problem_statement, primary_feature, key_features, differentiators,
+            tech_stack, revenue_model, pricing_strategy, target_industry } = req.body;
+
+    // Require at least title or source_url
+    if (!title && !source_url) {
+      return res.status(400).json({ error: 'Either title or source_url is required' });
+    }
+
+    // Trigger F3 workflow - it handles URL research and/or preserves user fields
+    const result = await n8nService.createSolution({
+      source_url,
+      title,
+      description,
+      value_proposition,
+      target_audience,
+      problem_statement,
+      primary_feature,
+      key_features,
+      differentiators,
+      tech_stack,
+      revenue_model,
+      pricing_strategy,
+      target_industry
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Solution creation triggered via F3 workflow',
+      workflow_response: result
+    });
+  } catch (error) {
+    console.error('Error creating solution:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update a solution
+router.put('/solutions/:id', async (req, res) => {
+  try {
+    const solution = await databaseService.updateSolution(req.params.id, req.body);
+    res.json(solution);
+  } catch (error) {
+    console.error('Error updating solution:', error);
+    if (error.message === 'Solution not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete multiple solutions (bulk)
+router.delete('/solutions', async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Array of solution IDs is required' });
+    }
+
+    const result = await databaseService.deleteSolutions(ids);
+    res.json(result);
+  } catch (error) {
+    console.error('Error deleting solutions:', error);
+
+    // Check for structured error (solutions with products)
+    try {
+      const errorData = JSON.parse(error.message);
+      if (errorData.code === 'HAS_PRODUCTS') {
+        return res.status(409).json(errorData);
+      }
+    } catch (e) {
+      // Not a JSON error, continue with default handling
+    }
+
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// === PRODUCTS ===
+
+// Delete multiple products (bulk) with GitHub repo and GCP tenant cascade
+router.delete('/products', async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Array of product IDs is required' });
+    }
+
+    // Delete products from database (returns GitHub repos and GCP tenants to delete)
+    const result = await databaseService.deleteProducts(ids);
+
+    // Delete GitHub repositories
+    if (result.github_repos_to_delete && result.github_repos_to_delete.length > 0) {
+      console.log(`Deleting ${result.github_repos_to_delete.length} GitHub repositories...`);
+      const githubResult = await githubService.deleteRepositories(result.github_repos_to_delete);
+      result.github_deletion = githubResult;
+    }
+
+    // Delete GCP Identity Platform tenants
+    if (result.gcp_tenants_to_delete && result.gcp_tenants_to_delete.length > 0) {
+      console.log(`Deleting ${result.gcp_tenants_to_delete.length} GCP tenants...`);
+      const gcpResult = await gcpService.deleteTenants(result.gcp_tenants_to_delete);
+      result.gcp_deletion = gcpResult;
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error deleting products:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -645,10 +793,10 @@ router.post('/solutions/:id/create-product', async (req, res) => {
       return res.status(400).json({ error: 'Solution already has a project' });
     }
     
-    // Trigger n8n webhook for F4-Create-Product-V2
-    console.log('ENV N8N_F4_WEBHOOK_URL:', process.env.N8N_F4_WEBHOOK_URL);
-    const webhookUrl = process.env.N8N_F4_WEBHOOK_URL || 'http://localhost:5678/webhook/f4-create-product';
-    console.log('Triggering webhook:', webhookUrl);
+    // Trigger n8n webhook for F4-Create-Product
+    const baseWebhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook';
+    const webhookUrl = `${baseWebhookUrl}/f4-create-product`;
+    console.log('Triggering F4 webhook:', webhookUrl);
     
     const webhookData = {
       solution_id: solutionId,
