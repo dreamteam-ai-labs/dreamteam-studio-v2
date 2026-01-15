@@ -67,6 +67,8 @@ export const getCloneSuggestion = (excludeUrls = []) => {
   return api.get('/solutions/clone-suggestion', { params });
 };
 export const analyzeUrl = (url) => api.post('/solutions/analyze-url', { url });
+export const createSolutionFromFeatures = (features, sourceUrl = null) =>
+  api.post('/solutions/from-features', { features, source_url: sourceUrl });
 
 // Projects
 export const getProjects = () => api.get('/projects');

@@ -1,6 +1,6 @@
 import { useState, useCallback, memo, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getSolutions, getProblemsBySolution, getProblemsByCluster, getSolutionsFilterOptions, getBestSolutionCandidate, createProductFromSolution, createSolution, updateSolution, deleteSolutions, getCloneSuggestion, analyzeUrl } from '../services/api';
+import { getSolutions, getProblemsBySolution, getProblemsByCluster, getSolutionsFilterOptions, getBestSolutionCandidate, createProductFromSolution, createSolution, createSolutionFromFeatures, updateSolution, deleteSolutions, getCloneSuggestion, analyzeUrl } from '../services/api';
 import { formatDateTime, isNewItem } from '../utils/dateUtils';
 import { formatLargeCurrency, formatPercentage } from '../utils/numberUtils';
 import SearchInput from './SearchInput';
@@ -172,6 +172,7 @@ const CreateEditSolutionModal = memo(function CreateEditSolutionModal({
   solution = null, // null for create, object for edit
   isLoading = false
 }) {
+  const [createMode, setCreateMode] = useState('clone'); // 'clone' or 'features'
   const [formData, setFormData] = useState({
     source_url: '',
     title: '',
@@ -179,10 +180,66 @@ const CreateEditSolutionModal = memo(function CreateEditSolutionModal({
     value_proposition: '',
     target_audience: ''
   });
+  const [featuresData, setFeaturesData] = useState({
+    file: null,
+    json: null,
+    error: null,
+    sourceUrl: ''
+  });
   const [isFetchingSuggestion, setIsFetchingSuggestion] = useState(false);
   const [isAnalyzingUrl, setIsAnalyzingUrl] = useState(false);
   const [seenUrls, setSeenUrls] = useState([]);
   const [suggestionError, setSuggestionError] = useState(null);
+  const fileInputRef = useRef(null);
+
+  // Handle features.json file upload
+  const handleFileUpload = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target.result);
+
+        // Basic validation
+        if (!json.features || !Array.isArray(json.features)) {
+          setFeaturesData({
+            file: file.name,
+            json: null,
+            error: 'Invalid features.json: must have a "features" array',
+            sourceUrl: featuresData.sourceUrl
+          });
+          return;
+        }
+
+        if (json.features.length === 0) {
+          setFeaturesData({
+            file: file.name,
+            json: null,
+            error: 'Invalid features.json: features array is empty',
+            sourceUrl: featuresData.sourceUrl
+          });
+          return;
+        }
+
+        setFeaturesData({
+          file: file.name,
+          json: json,
+          error: null,
+          sourceUrl: featuresData.sourceUrl
+        });
+      } catch (err) {
+        setFeaturesData({
+          file: file.name,
+          json: null,
+          error: `Invalid JSON: ${err.message}`,
+          sourceUrl: featuresData.sourceUrl
+        });
+      }
+    };
+    reader.readAsText(file);
+  }, [featuresData.sourceUrl]);
 
   // Fetch a clone suggestion from the LLM
   const fetchSuggestion = useCallback(async () => {
@@ -233,6 +290,7 @@ const CreateEditSolutionModal = memo(function CreateEditSolutionModal({
   useEffect(() => {
     if (solution) {
       // Edit mode - populate with existing data
+      setCreateMode('clone');
       setFormData({
         source_url: solution.source_url || '',
         title: solution.title || '',
@@ -241,8 +299,10 @@ const CreateEditSolutionModal = memo(function CreateEditSolutionModal({
         target_audience: solution.target_audience || ''
       });
       setSuggestionError(null);
+      setFeaturesData({ file: null, json: null, error: null, sourceUrl: '' });
     } else if (isOpen) {
-      // Create mode - fetch a suggestion
+      // Create mode - reset everything (user must click to get suggestion)
+      setCreateMode('clone');
       setFormData({
         source_url: '',
         title: '',
@@ -252,13 +312,24 @@ const CreateEditSolutionModal = memo(function CreateEditSolutionModal({
       });
       setSeenUrls([]);
       setSuggestionError(null);
-      fetchSuggestion();
+      setFeaturesData({ file: null, json: null, error: null, sourceUrl: '' });
+      // Don't auto-fetch suggestion - user can click "Get Suggestion" button
     }
   }, [solution, isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave(formData);
+    if (createMode === 'features') {
+      // Features upload mode
+      onSave({
+        mode: 'features',
+        features: featuresData.json,
+        source_url: featuresData.sourceUrl || null
+      });
+    } else {
+      // Clone mode (existing behavior)
+      onSave(formData);
+    }
   };
 
   if (!isOpen) return null;
@@ -294,14 +365,125 @@ const CreateEditSolutionModal = memo(function CreateEditSolutionModal({
             </div>
           )}
 
+          {/* Mode Toggle - only show in create mode */}
+          {!isEdit && (
+            <div className="mb-4 flex border-b border-gray-200">
+              <button
+                type="button"
+                onClick={() => setCreateMode('clone')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  createMode === 'clone'
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Gen Clone (URL)
+              </button>
+              <button
+                type="button"
+                onClick={() => setCreateMode('features')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  createMode === 'features'
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Upload Features
+              </button>
+            </div>
+          )}
+
           {/* Error message */}
-          {suggestionError && (
+          {suggestionError && createMode === 'clone' && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
               {suggestionError}
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Features Upload Mode */}
+            {createMode === 'features' && !isEdit && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Features JSON File <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".json"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                    >
+                      Choose File
+                    </button>
+                    <span className="text-sm text-gray-600">
+                      {featuresData.file || 'No file selected'}
+                    </span>
+                  </div>
+                  {featuresData.error && (
+                    <p className="mt-1 text-sm text-red-600">{featuresData.error}</p>
+                  )}
+                  {featuresData.json && (
+                    <p className="mt-1 text-sm text-green-600">
+                      Valid: {featuresData.json.features.length} features found
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Source URL <span className="text-gray-400">(optional - where features were extracted from)</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={featuresData.sourceUrl}
+                    onChange={(e) => setFeaturesData(prev => ({ ...prev, sourceUrl: e.target.value }))}
+                    placeholder="https://example.com"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                  <p className="text-sm text-blue-700">
+                    <strong>How it works:</strong> Upload a features.json file extracted from a website using Claude Chrome Extension.
+                    The AI will analyze the features and generate a solution with viability scoring.
+                  </p>
+                </div>
+              </>
+            )}
+
+            {/* Clone Mode - existing form */}
+            {(createMode === 'clone' || isEdit) && (
+            <>
+            {/* Get AI Suggestion button - shown prominently in create mode */}
+            {!isEdit && !formData.source_url && !isFetchingSuggestion && (
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-medium text-gray-900">Get AI Clone Suggestion</h3>
+                    <p className="text-sm text-gray-600">Let AI suggest a SaaS to clone based on market trends</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchSuggestion}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    Get Suggestion
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Source URL <span className="text-gray-400">(clone target)</span>
@@ -315,7 +497,7 @@ const CreateEditSolutionModal = memo(function CreateEditSolutionModal({
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   disabled={isFetchingSuggestion}
                 />
-                {!isEdit && (
+                {!isEdit && formData.source_url && (
                   <button
                     type="button"
                     onClick={fetchSuggestion}
@@ -405,6 +587,8 @@ const CreateEditSolutionModal = memo(function CreateEditSolutionModal({
                 disabled={isFetchingSuggestion}
               />
             </div>
+            </>
+            )}
 
             <div className="flex justify-end gap-3 pt-4 border-t">
               <button
@@ -418,9 +602,14 @@ const CreateEditSolutionModal = memo(function CreateEditSolutionModal({
               <button
                 type="submit"
                 className="px-4 py-2 text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50"
-                disabled={isLoading || isFetchingSuggestion || (!formData.title && !formData.source_url)}
+                disabled={
+                  isLoading ||
+                  isFetchingSuggestion ||
+                  (createMode === 'clone' && !formData.title && !formData.source_url) ||
+                  (createMode === 'features' && !featuresData.json)
+                }
               >
-                {isLoading ? 'Saving...' : (isEdit ? 'Update Solution' : 'Create Solution')}
+                {isLoading ? 'Saving...' : (isEdit ? 'Update Solution' : (createMode === 'features' ? 'Upload & Generate' : 'Create Solution'))}
               </button>
             </div>
           </form>
@@ -927,8 +1116,11 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
       if (editingSolution) {
         // Update existing solution
         await updateSolution(editingSolution.id, formData);
+      } else if (formData.mode === 'features') {
+        // Create solution from features.json upload
+        await createSolutionFromFeatures(formData.features, formData.source_url);
       } else {
-        // Create new solution
+        // Create new solution (clone mode)
         await createSolution(formData);
       }
       // Refresh the solutions list
@@ -985,7 +1177,7 @@ function SolutionsTable({ filters: externalFilters, onFiltersChange, onDataFilte
   };
 
   const handleCreateProduct = async (solution) => {
-    if (window.confirm(`Create a product from "${solution.title}"?\n\nThis will trigger the F4 workflow to create:\n- GitHub repository\n- Complete product setup`)) {
+    if (window.confirm(`Create a product from "${solution.title}"?\n\nThis will trigger the F4 workflow to create:\n- GitHub repository with dedicated Codespace\n- GCP IP Tenant\n- Complete product setup`)) {
       try {
         await createProductFromSolution(solution.id);
         alert('Product creation initiated! Check Linear and GitHub in a few minutes.');

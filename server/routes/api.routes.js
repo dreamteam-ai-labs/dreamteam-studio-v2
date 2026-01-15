@@ -236,6 +236,64 @@ router.post('/solutions/analyze-url', async (req, res) => {
   }
 });
 
+// Create solution from features.json upload - triggers F3 features webhook
+router.post('/solutions/from-features', async (req, res) => {
+  try {
+    const { features, source_url } = req.body;
+
+    // Validate features
+    if (!features || !features.features || !Array.isArray(features.features)) {
+      return res.status(400).json({ error: 'Invalid features.json: must have a features array' });
+    }
+
+    if (features.features.length === 0) {
+      return res.status(400).json({ error: 'Invalid features.json: features array is empty' });
+    }
+
+    // Trigger F3 features webhook
+    const baseWebhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook';
+    const webhookUrl = `${baseWebhookUrl}/f3-features-upload`;
+    console.log('Triggering F3 features webhook:', webhookUrl);
+
+    const webhookData = {
+      features,
+      source_url,
+      triggered_by: 'studio_upload',
+      timestamp: new Date().toISOString()
+    };
+
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(webhookData)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('F3 features webhook error:', errorText);
+      throw new Error(`F3 features webhook failed: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+
+    res.status(201).json({
+      success: true,
+      message: 'Solution creation from features triggered via F3 workflow',
+      workflow_response: result
+    });
+  } catch (error) {
+    console.error('Error creating solution from features:', error);
+    if (error.code === 'ECONNREFUSED') {
+      return res.status(503).json({
+        error: 'F3 features workflow is not available. Please ensure n8n is running and the webhook is configured.'
+      });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/solutions/:id/problems', async (req, res) => {
   try {
     const problems = await databaseService.getProblemsBySolutionId(req.params.id);
